@@ -1,0 +1,123 @@
+{
+  "extensionMap": {
+    "c": "c",
+    "cpp": "cpp",
+    "cc": "cpp"
+  },
+  "configs": {
+    "c": "clang --target=riscv64-unknown-linux-elf -march=rv64gc_xsmx -g -O3 -c -S -emit-llvm -DSPEC_CPU -DSPEC_CPU_LP64 -I.",
+    "cpp": "clang++ --target=riscv64-unknown-linux-elf -march=rv64gc_xsmx -g -O3 -c -S -emit-llvm -DSPEC_CPU -DSPEC_CPU_LP64 -I. -std=c++03",
+    "fortran": "flang-new -O3 -c -S -emit-llvm -DSPEC_CPU_LP64 -I."
+  },
+  "directoryConfigs": {
+    "400.perlbench": {
+      "flags": {
+        "c": "-DPERL_CORE -DSPEC_CPU_LINUX_X64 -std=gnu90"
+      },
+      "ignore": {
+        "files": [
+          "parser-util.c",
+          "hparser.c",
+          "perllib.c",
+          "win32.c",
+          "win32io.c",
+          "win32sck.c",
+          "win32thread.c"
+        ]
+      }
+    },
+    "401.bzip2": {
+      "flags": {
+        "c": "-Wno-int-conversion"
+      }
+    },
+    "416.gamess": {
+      "flags": {
+        "fortran": "-ffixed-form"
+      }
+    },
+    "429.mcf": {
+      "flags": {
+        "c": "-DWANT_STDC_PROTO"
+      }
+    },
+    "433.milc": {
+      "flags": {
+        "c": "-DFN -DFAST -DCONGRAD_TMP_VECTORS -DDSLASH_TMP_LINKS"
+      }
+    },
+    "435.gromacs": {
+      "flags": {
+        "c": "-DHAVE_CONFIG_H"
+      }
+    },
+    "436.cactusADM": {
+      "flags": {
+        "c": "-Iinclude -I../include -DCCODE",
+        "fortran": "-fno-second-underscore"
+      }
+    },
+    "445.gobmk": {
+      "flags": {
+        "c": "-DHAVE_CONFIG_H -I.. -Iinclude -I../include"
+      }
+    },
+    "447.dealII": {
+      "flags": {
+        "cpp": "-DSPEC_CPU_TABLE_WORKAROUND -Ddeal_II_dimension=3 -include cstdlib -include cstring -include stddef.h -Iinclude"
+      }
+    },
+    "450.soplex": {
+      "flags": {
+        "cpp": "-DNDEBUG"
+      }
+    },
+    "454.calculix": {
+      "flags": {
+        "c": "-ISPOOLES -Wno-int-conversion",
+        "fortran": "-ISPOOLES"
+      }
+    },
+    "456.hmmer": {
+      "flags": {
+        "c": "-funsigned-char"
+      }
+    },
+    "462.libquantum": {
+      "flags": {
+        "c": "-DSPEC_CPU_LINUX"
+      }
+    },
+    "471.omnetpp": {
+      "flags": {
+        "cpp": "-DNDEBUG=1 -Iomnet_include -Ilibs/envir"
+      }
+    },
+    "473.astar": {
+      "flags": {
+        "cpp": "-DSPEC_CPU_LITTLE_ENDIAN"
+      }
+    },
+    "481.wrf": {
+      "flags": {
+        "c": "-DSPEC_CPU_LINUX -DPATHSCALE_COMPILER -Inetcdf/include",
+        "fortran": "-Inetcdf/include -fno-second-underscore"
+      }
+    },
+    "482.sphinx3": {
+      "flags": {
+        "c": "-DHAVE_CONFIG_H -Ilibutil"
+      }
+    },
+    "483.xalancbmk": {
+      "flags": {
+        "cpp": "-DSPEC_CPU_LINUX -DNDEBUG -DAPP_NO_THREADS -DXALAN_INMEM_MSG_LOADER -DPROJ_XMLPARSER -DPROJ_XMLUTIL -DPROJ_PARSERS -DPROJ_SAX4C -DPROJ_SAX2 -DPROJ_DOM -DPROJ_VALIDATORS -DXML_USE_NATIVE_TRANSCODER -DXML_USE_INMEM_MESSAGELOADER -DXML_USE_PTHREADS -Ixercesc -Ixercesc/dom -Ixercesc/dom/impl -Ixercesc/sax -Ixercesc/util/MsgLoaders/InMemory -Ixercesc/util/Transcoders/Iconv -Ixalanc/include -include cstring"
+      },
+      "ignore": {
+        "configs": [
+          "c"
+        ]
+      }
+    }
+  }
+}

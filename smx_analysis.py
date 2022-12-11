@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+
+from typing import Optional, List, Any, Dict
+import subprocess
+import shlex
+import os
+from os import path
+import json
+import sys
+import tempfile
+import multiprocessing
+import functools
+
+
+class RunCommandError(Exception):
+  '''
+  Exception that indicates error when running a command line.
+  '''
+  pass
+
+
+def run_or_fail(cmd: str, stdin: Optional[str] = None, cwd: Optional[str] = None,
+                capture_stderr: bool = False) -> str:
+  '''
+  Runs the given command line, raise `RunCommandError` if error returned.
+
+  Returns the standard output.
+  '''
+  ret = subprocess.run(shlex.split(cmd), input=stdin, cwd=cwd,
+                       capture_output=True, text=True)
+  if ret.returncode:
+    raise RunCommandError(f'failed to run "{cmd}", returned {ret.returncode}')
+  return ret.stderr if capture_stderr else ret.stdout
+
+
+class CompilationConfig:
+  '''
+  Compilation configuration.
+  '''
+
+  def __init__(self, config_file: str) -> None:
+    with open(config_file) as f:
+      self.__config = json.load(f)
+
+  def __ext_cfg(self, ext: str) -> Optional[str]:
+    return self.__config['extensionMap'].get(ext.lower())
+
+  def __dir_config(self, dir_name: str) -> Dict[str, Any]:
+    return self.__config['directoryConfigs'].get(dir_name, {})
+
+  def __get_compile_cmd(self, dir_name: str, ext: str) -> str:
+    cfg = self.__ext_cfg(ext)
+    if cfg is None:
+      raise RuntimeError(f'unknown extension "{ext}"')
+    cmd = self.__config['configs'][cfg]
+    flags = self.__dir_config(dir_name).get('flags', {}).get(cfg)
+    if flags is not None:
+      return f'{cmd} {flags}'
+    return cmd
+
+  def is_source(self, dir_name: str, file: str) -> bool:
+    '''
+    Returns `True` if the given file is a valid source file.
+    '''
+    ext = path.splitext(file)[-1][1:]
+    cfg = self.__ext_cfg(ext)
+    if cfg is None:
+      return False
+    ignore = self.__dir_config(dir_name).get('ignore', {})
+    if cfg in ignore.get('configs', []):
+      return False
+    for f in ignore.get('files', []):
+      if file.endswith(f):
+        return False
+    return True
+
+  def compile(self, cwd: str, src_file: str) -> str:
+    '''
+    Compiles the given source file to LLVM IR file.
+
+    Returns the compiled LLVM IR.
+    '''
+    dir_name = path.basename(cwd)
+    ext = path.splitext(src_file)[-1][1:]
+    cmd = self.__get_compile_cmd(dir_name, ext)
+    return run_or_fail(f'{cmd} {src_file} -o -', cwd=cwd)
+
+
+def eprint(*args, **kwargs) -> None:
+  '''
+  Prints to `stderr`.
+  '''
+  print(*args, file=sys.stderr, **kwargs)
+  sys.stderr.flush()
+
+
+def log_temp(content: str, suffix: Optional[str] = None) -> str:
+  '''
+  Logs the given content to a temporary file, returns the file name.
+  '''
+  fd, temp = tempfile.mkstemp(prefix='smxa-', suffix=suffix, dir='.')
+  with os.fdopen(fd, 'w') as f:
+    f.write(content)
+  return temp
+
+
+def analyse(ll: str, smx_lib: str) -> List[Any]:
+  '''
+  Analyses the given LLVM IR and returns the result.
+  '''
+  passes = 'instnamer,loop-simplify,print<stream-memory>'
+  pass_flags = f'-load-pass-plugin={smx_lib} -passes="{passes}"'
+  flags = f'{pass_flags} -disable-output -march=rv46gc_xsmx'
+  try:
+    out = run_or_fail(f'opt {flags}', stdin=ll, capture_stderr=True)
+  except RunCommandError as e:
+    temp = log_temp(ll, suffix='.ll')
+    eprint('Error occurred when running SMX analysis!')
+    eprint(f'The LLVM IR file has already benn dumped to "{temp}".')
+    raise e
+  result = []
+  try:
+    for line in out.splitlines():
+      result += json.loads(line)
+  except json.JSONDecodeError as e:
+    temp = log_temp(out, suffix='.json')
+    eprint('Error occurred when parsing JSON result!')
+    eprint(f'The analysis output has already benn dumped to "{temp}".')
+    raise e
+  return result
+
+
+def analyse_src(src_file: str, dir: str, config: CompilationConfig, smx_lib: str) -> List[Any]:
+  '''
+  Analyses the given source file and return the result.
+  '''
+  ll = config.compile(dir, src_file)
+  return analyse(ll, smx_lib)
+
+
+def analyse_dir(dir_name: str, dir: str, config: CompilationConfig, smx_lib: str) -> List[Any]:
+  '''
+  Analyses all of the C files in the given directory
+  and returns the result.
+  '''
+  src_files = []
+  dir = path.abspath(dir)
+  for root, _, files in os.walk(dir):
+    for f in files:
+      if config.is_source(dir_name, f):
+        src_files.append(path.abspath(path.join(root, f)))
+  with multiprocessing.Pool(multiprocessing.cpu_count()) as p:
+    f = functools.partial(analyse_src, dir=dir, config=config, smx_lib=smx_lib)
+    results = p.map(f, src_files)
+  return [item for sublist in results for item in sublist]
+
+
+def analyse_root(root: str, out_dir: str, config: CompilationConfig, smx_lib: str) -> None:
+  '''
+  Analyses the given root directory
+  and save results to the give output directory.
+  '''
+  dirs = os.listdir(root)
+  for i, dir in enumerate(dirs):
+    dir_path = path.join(root, dir)
+    if path.isdir(dir_path):
+      out_file = path.join(out_dir, f'{dir}.json')
+      if path.exists(out_file):
+        eprint(f'[{i + 1}/{len(dirs)}] Skipped "{dir}"')
+      else:
+        eprint(f'[{i + 1}/{len(dirs)}] Analysing "{dir}" ...')
+        result = analyse_dir(dir, dir_path, config, smx_lib)
+        with open(out_file, 'w') as f:
+          json.dump(result, f)
+
+
+if __name__ == '__main__':
+  import argparse
+  parser = argparse.ArgumentParser(
+      description='SMX analysis for projects/repositories.')
+  parser.add_argument('root', type=str, help='project root directory')
+  parser.add_argument('-c', '--config', type=str, required=True,
+                      help='compilation configuration')
+  parser.add_argument('-l', '--lib', type=str, required=True,
+                      help='SMX transforms library')
+  parser.add_argument('-d', '--dir', type=str, default=None,
+                      help='specify the directory to analyse')
+  parser.add_argument('-o', '--output', type=str, default=None,
+                      help='output directory, default to CWD')
+
+  args = parser.parse_args()
+  config = CompilationConfig(args.config)
+  if args.output is None:
+    out_dir = path.curdir
+  else:
+    out_dir = args.output
+    if not path.isdir(out_dir):
+      eprint(f'invalid output directory "{out_dir}"')
+      exit(-1)
+
+  if args.dir is None:
+    result = analyse_root(args.root, out_dir, config, args.lib)
+  else:
+    dir_path = path.join(args.root, args.dir)
+    if not path.isdir(dir_path):
+      eprint(f'invalid directory "{dir_path}"')
+      exit(-1)
+    dir_name = path.basename(dir_path)
+    result = analyse_dir(dir_name, dir_path, config, args.lib)
+    with open(path.join(out_dir, f'{dir_name}.json'), 'w') as f:
+      json.dump(result, f)
