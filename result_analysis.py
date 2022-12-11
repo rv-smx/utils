@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Dict, Any, List, TextIO, Optional
+from typing import Dict, Any, List, TextIO, Optional, Tuple
 import json
 import os
 from dataclasses import dataclass
@@ -204,9 +204,6 @@ class AnalysisResult:
   num_loops: int
   num_partially_streamizable: int
   num_fully_streamizable: int
-  num_ivs_freq_dist: Dict[int, int]
-  num_iv_chain_len_freq_dist: Dict[int, int]
-  num_mss_freq_dist: Dict[int, int]
   num_supported_mss: int
   num_indirect_supported_mss: int
   num_loads: int
@@ -215,6 +212,12 @@ class AnalysisResult:
   num_stores: int
   num_stream_stores: int
   num_indirect_stream_stores: int
+  max_num_ivs: int = 0
+  most_freq_ivs: Tuple[int, int] = (0, 0)
+  max_iv_chain_len: int = 0
+  most_freq_iv_chain_lens: Tuple[int, int] = (0, 0)
+  max_num_mss: int = 0
+  most_freq_mss: Tuple[int, int] = (0, 0)
 
   def __init__(self, streams: List[StreamInfo]) -> None:
     num_loops = len(streams)
@@ -260,10 +263,22 @@ class AnalysisResult:
     object.__setattr__(self, 'num_partially_streamizable',
                        num_partially_streamizable)
     object.__setattr__(self, 'num_fully_streamizable', num_fully_streamizable)
-    object.__setattr__(self, 'num_ivs_freq_dist', num_ivs_freq_dist)
-    object.__setattr__(self, 'num_iv_chain_len_freq_dist',
-                       num_iv_chain_len_freq_dist)
-    object.__setattr__(self, 'num_mss_freq_dist', num_mss_freq_dist)
+    if len(num_ivs_freq_dist):
+      object.__setattr__(self, 'max_num_ivs', max(num_ivs_freq_dist.keys()))
+      num_ivs_freq_dist.pop(0, None)
+      object.__setattr__(self, 'most_freq_ivs',
+                         max(num_ivs_freq_dist.items(), key=lambda x: x[1]))
+    if len(num_iv_chain_len_freq_dist):
+      object.__setattr__(self, 'max_iv_chain_len',
+                         max(num_iv_chain_len_freq_dist.keys()))
+      num_iv_chain_len_freq_dist.pop(0, None)
+      object.__setattr__(self, 'most_freq_iv_chain_lens',
+                         max(num_iv_chain_len_freq_dist.items(), key=lambda x: x[1]))
+    if len(num_mss_freq_dist):
+      object.__setattr__(self, 'max_num_mss', max(num_mss_freq_dist.keys()))
+      num_mss_freq_dist.pop(0, None)
+      object.__setattr__(self, 'most_freq_mss',
+                         max(num_mss_freq_dist.items(), key=lambda x: x[1]))
     object.__setattr__(self, 'num_supported_mss', num_supported_mss)
     object.__setattr__(self, 'num_indirect_supported_mss',
                        num_indirect_supported_mss)
@@ -293,20 +308,14 @@ class AnalysisResult:
     all_streamizable = self.num_partially_streamizable + self.num_fully_streamizable
     p(f'{indent}streamizable loops:', all_streamizable,
       f'({all_streamizable / self.num_loops * 100:.2f}%)')
-    p(f'{indent}max induction variable streams:',
-      max(self.num_ivs_freq_dist.keys()))
-    self.num_ivs_freq_dist.pop(0, None)
+    p(f'{indent}max induction variable streams: {self.max_num_ivs}')
     p(f'{indent}most freq. induction variable streams (num, freq):',
-      f'{max(self.num_ivs_freq_dist.items(), key=lambda x: x[1])}')
-    p(f'{indent}max induction variable chain length:',
-      max(self.num_iv_chain_len_freq_dist.keys()))
-    self.num_iv_chain_len_freq_dist.pop(0, None)
+      f'{self.most_freq_ivs}')
+    p(f'{indent}max induction variable chain length: {self.max_iv_chain_len}')
     p(f'{indent}most freq. induction variable chain (length, freq):',
-      f'{max(self.num_iv_chain_len_freq_dist.items(), key=lambda x: x[1])}')
-    p(f'{indent}max memory streams: {max(self.num_mss_freq_dist.keys())}')
-    self.num_mss_freq_dist.pop(0, None)
-    p(f'{indent}most freq. memory streams (num, freq):',
-      f'{max(self.num_mss_freq_dist.items(), key=lambda x: x[1])}')
+      f'{self.most_freq_iv_chain_lens}')
+    p(f'{indent}max memory streams: {self.max_num_mss}')
+    p(f'{indent}most freq. memory streams (num, freq): {self.most_freq_mss}')
     p(f'{indent}supported memory streams: {self.num_supported_mss}')
     if self.num_supported_mss:
       p(f'{indent}indirect memory streams:', self.num_indirect_supported_mss,
@@ -327,11 +336,34 @@ class AnalysisResult:
           f'({self.num_indirect_stream_stores / self.num_stream_stores * 100:.2f}%)')
 
 
-def dump_csv(f: TextIO, results: List[AnalysisResult]) -> None:
+def dump_csv(f: TextIO, results: Dict[str, AnalysisResult]) -> None:
   '''
   Dumps the given results to CSV file.
   '''
-  pass
+  print('name', 'num loops', 'partially streamizable loops',
+        'fully streamizable loops', 'streamizable loops',
+        'max induction variable streams', 'most freq induction variable streams',
+        'most freq induction variable streams freq',
+        'max induction variable chain length',
+        'most freq induction variable chain length',
+        'most freq induction variable chain freq', 'max memory streams',
+        'most freq memory streams', 'most freq memory streams freq',
+        'supported memory streams', 'indirect memory streams', 'total loads',
+        'stream loads', 'indirect stream loads', 'total stores', 'stream stores',
+        'indirect stream stores', sep=',', file=f)
+  for name, result in results.items():
+    print(name, result.num_loops, result.num_partially_streamizable,
+          result.num_fully_streamizable,
+          result.num_partially_streamizable + result.num_fully_streamizable,
+          result.max_num_ivs, result.most_freq_ivs[0], result.most_freq_ivs[1],
+          result.max_iv_chain_len, result.most_freq_iv_chain_lens[0],
+          result.most_freq_iv_chain_lens[1], result.max_num_mss,
+          result.most_freq_mss[0], result.most_freq_mss[1],
+          result.num_supported_mss, result.num_indirect_supported_mss,
+          result.num_loads, result.num_stream_loads,
+          result.num_indirect_stream_loads, result.num_stores,
+          result.num_stream_stores, result.num_indirect_stream_stores,
+          sep=',', file=f)
 
 
 if __name__ == '__main__':
@@ -351,7 +383,7 @@ if __name__ == '__main__':
   else:
     file = open(args.output, 'w')
 
-  results = []
+  results = {}
   for d in sorted(os.listdir(args.dir)):
     path = os.path.join(args.dir, d)
     (name, ext) = os.path.splitext(d)
@@ -363,7 +395,7 @@ if __name__ == '__main__':
         print(d, file=file)
         result.print(file=file, indent_width=2)
       else:
-        results.append(result)
+        results[d] = result
 
   if not args.print:
     dump_csv(file, results)
