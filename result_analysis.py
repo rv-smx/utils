@@ -4,6 +4,7 @@ from typing import Dict, Any, List
 import json
 import sys
 import os
+from dataclasses import dataclass
 
 
 class StreamInfo:
@@ -195,99 +196,134 @@ class StreamInfo:
     return self.__num_indirect_stream_stores
 
 
-def get_stream_info_list(result_file: str) -> List[StreamInfo]:
+@dataclass(frozen=True)
+class AnalysisResult:
   '''
-  Reads the given result file, parses it, and returns a list of `StreamInfo`.
+  Analysis result of the given stream information list.
   '''
-  with open(result_file) as f:
-    return list(map(StreamInfo, json.load(f)))
 
+  num_loops: int
+  num_partially_streamizable: int
+  num_fully_streamizable: int
+  num_ivs_freq_dist: Dict[int, int]
+  num_iv_chain_len_freq_dist: Dict[int, int]
+  num_mss_freq_dist: Dict[int, int]
+  num_supported_mss: int
+  num_indirect_supported_mss: int
+  num_loads: int
+  num_stream_loads: int
+  num_indirect_stream_loads: int
+  num_stores: int
+  num_stream_stores: int
+  num_indirect_stream_stores: int
 
-def print_info(name: str, streams: List[StreamInfo]) -> None:
-  '''
-  Prints information related to the given stream info list.
-  '''
-  num_loops = len(streams)
-  num_partially_streamizable = 0
-  num_fully_streamizable = 0
-  num_ivs_freq_dist = {}
-  num_iv_chain_len_freq_dist = {}
-  num_mss_freq_dist = {}
-  num_supported_mss = 0
-  num_indirect_supported_mss = 0
-  num_loads = 0
-  num_stream_loads = 0
-  num_indirect_stream_loads = 0
-  num_stores = 0
-  num_stream_stores = 0
-  num_indirect_stream_stores = 0
-  for stream in streams:
-    # streamizable loops
-    if stream.num_supported_mss:
-      if stream.num_supported_mss == stream.num_mss:
-        num_fully_streamizable += 1
-      else:
-        num_partially_streamizable += 1
-    # streams frequency distribution
-    prev = num_ivs_freq_dist.setdefault(stream.num_supported_ivs, 0)
-    num_ivs_freq_dist[stream.num_supported_ivs] = prev + 1
-    prev = num_iv_chain_len_freq_dist.setdefault(stream.max_iv_chain_len, 0)
-    num_iv_chain_len_freq_dist[stream.max_iv_chain_len] = prev + 1
-    prev = num_mss_freq_dist.setdefault(stream.num_supported_mss, 0)
-    num_mss_freq_dist[stream.num_supported_mss] = prev + 1
-    # indirect memory streams percentage
-    num_supported_mss += stream.num_supported_mss
-    num_indirect_supported_mss += stream.num_indirect_supported_mss
-    # memory operations percentage
-    num_loads += stream.num_loads
-    num_stream_loads += stream.num_stream_loads
-    num_indirect_stream_loads += stream.num_indirect_stream_loads
-    num_stores += stream.num_stores
-    num_stream_stores += stream.num_stream_stores
-    num_indirect_stream_stores += stream.num_indirect_stream_stores
-  # print result
-  print(name)
-  print(f'  num loops: {num_loops}')
-  if not num_loops:
-    return
-  print('  partially streamizable loops:', num_partially_streamizable,
-        f'({num_partially_streamizable / num_loops * 100:.2f}%)')
-  print('  fully streamizable loops:', num_fully_streamizable,
-        f'({num_fully_streamizable / num_loops * 100:.2f}%)')
-  all_streamizable = num_partially_streamizable + num_fully_streamizable
-  print('  streamizable loops:', all_streamizable,
-        f'({all_streamizable / num_loops * 100:.2f}%)')
-  print(f'  max induction variable streams: {max(num_ivs_freq_dist.keys())}')
-  num_ivs_freq_dist.pop(0, None)
-  print('  most freq. induction variable streams (num, freq):',
-        f'{max(num_ivs_freq_dist.items(), key=lambda x: x[1])}')
-  print('  max induction variable chain length:',
-        max(num_iv_chain_len_freq_dist.keys()))
-  num_iv_chain_len_freq_dist.pop(0, None)
-  print('  most freq. induction variable chain (length, freq):',
-        f'{max(num_iv_chain_len_freq_dist.items(), key=lambda x: x[1])}')
-  print(f'  max memory streams: {max(num_mss_freq_dist.keys())}')
-  num_mss_freq_dist.pop(0, None)
-  print('  most freq. memory streams (num, freq):',
-        f'{max(num_mss_freq_dist.items(), key=lambda x: x[1])}')
-  print(f'  supported memory streams: {num_supported_mss}')
-  if num_supported_mss:
-    print('  indirect memory streams:', num_indirect_supported_mss,
-          f'({num_indirect_supported_mss / num_supported_mss * 100:.2f}%)')
-  print(f'  total loads: {num_loads}')
-  if num_loads:
-    print('  stream loads:', num_stream_loads,
-          f'({num_stream_loads / num_loads * 100:.2f}%)')
-    if num_stream_loads:
-      print('  indirect stream loads:', num_indirect_stream_loads,
-            f'({num_indirect_stream_loads / num_stream_loads * 100:.2f}%)')
-  print(f'  total stores: {num_stores}')
-  if num_stores:
-    print('  stream stores:', num_stream_stores,
-          f'({num_stream_stores / num_stores * 100:.2f}%)')
-    if num_stream_stores:
-      print('  indirect stream stores:', num_indirect_stream_stores,
-            f'({num_indirect_stream_stores / num_stream_stores * 100:.2f}%)')
+  def __init__(self, streams: List[StreamInfo]) -> None:
+    num_loops = len(streams)
+    num_partially_streamizable = 0
+    num_fully_streamizable = 0
+    num_ivs_freq_dist = {}
+    num_iv_chain_len_freq_dist = {}
+    num_mss_freq_dist = {}
+    num_supported_mss = 0
+    num_indirect_supported_mss = 0
+    num_loads = 0
+    num_stream_loads = 0
+    num_indirect_stream_loads = 0
+    num_stores = 0
+    num_stream_stores = 0
+    num_indirect_stream_stores = 0
+    for stream in streams:
+      # streamizable loops
+      if stream.num_supported_mss:
+        if stream.num_supported_mss == stream.num_mss:
+          num_fully_streamizable += 1
+        else:
+          num_partially_streamizable += 1
+      # streams frequency distribution
+      prev = num_ivs_freq_dist.setdefault(stream.num_supported_ivs, 0)
+      num_ivs_freq_dist[stream.num_supported_ivs] = prev + 1
+      prev = num_iv_chain_len_freq_dist.setdefault(stream.max_iv_chain_len, 0)
+      num_iv_chain_len_freq_dist[stream.max_iv_chain_len] = prev + 1
+      prev = num_mss_freq_dist.setdefault(stream.num_supported_mss, 0)
+      num_mss_freq_dist[stream.num_supported_mss] = prev + 1
+      # indirect memory streams percentage
+      num_supported_mss += stream.num_supported_mss
+      num_indirect_supported_mss += stream.num_indirect_supported_mss
+      # memory operations percentage
+      num_loads += stream.num_loads
+      num_stream_loads += stream.num_stream_loads
+      num_indirect_stream_loads += stream.num_indirect_stream_loads
+      num_stores += stream.num_stores
+      num_stream_stores += stream.num_stream_stores
+      num_indirect_stream_stores += stream.num_indirect_stream_stores
+    # update result
+    object.__setattr__(self, 'num_loops', num_loops)
+    object.__setattr__(self, 'num_partially_streamizable',
+                       num_partially_streamizable)
+    object.__setattr__(self, 'num_fully_streamizable', num_fully_streamizable)
+    object.__setattr__(self, 'num_ivs_freq_dist', num_ivs_freq_dist)
+    object.__setattr__(self, 'num_iv_chain_len_freq_dist',
+                       num_iv_chain_len_freq_dist)
+    object.__setattr__(self, 'num_mss_freq_dist', num_mss_freq_dist)
+    object.__setattr__(self, 'num_supported_mss', num_supported_mss)
+    object.__setattr__(self, 'num_indirect_supported_mss',
+                       num_indirect_supported_mss)
+    object.__setattr__(self, 'num_loads', num_loads)
+    object.__setattr__(self, 'num_stream_loads', num_stream_loads)
+    object.__setattr__(self, 'num_indirect_stream_loads',
+                       num_indirect_stream_loads)
+    object.__setattr__(self, 'num_stores', num_stores)
+    object.__setattr__(self, 'num_stream_stores', num_stream_stores)
+    object.__setattr__(self, 'num_indirect_stream_stores',
+                       num_indirect_stream_stores)
+
+  def print(self, indent_width: int = 0) -> None:
+    '''
+    Prints the analysis result.
+    '''
+    indent = ' ' * indent_width
+    print(f'{indent}num loops: {self.num_loops}')
+    if not self.num_loops:
+      return
+    print(f'{indent}partially streamizable loops:', self.num_partially_streamizable,
+          f'({self.num_partially_streamizable / self.num_loops * 100:.2f}%)')
+    print(f'{indent}fully streamizable loops:', self.num_fully_streamizable,
+          f'({self.num_fully_streamizable / self.num_loops * 100:.2f}%)')
+    all_streamizable = self.num_partially_streamizable + self.num_fully_streamizable
+    print(f'{indent}streamizable loops:', all_streamizable,
+          f'({all_streamizable / self.num_loops * 100:.2f}%)')
+    print(f'{indent}max induction variable streams:',
+          max(self.num_ivs_freq_dist.keys()))
+    self.num_ivs_freq_dist.pop(0, None)
+    print(f'{indent}most freq. induction variable streams (num, freq):',
+          f'{max(self.num_ivs_freq_dist.items(), key=lambda x: x[1])}')
+    print(f'{indent}max induction variable chain length:',
+          max(self.num_iv_chain_len_freq_dist.keys()))
+    self.num_iv_chain_len_freq_dist.pop(0, None)
+    print(f'{indent}most freq. induction variable chain (length, freq):',
+          f'{max(self.num_iv_chain_len_freq_dist.items(), key=lambda x: x[1])}')
+    print(f'{indent}max memory streams: {max(self.num_mss_freq_dist.keys())}')
+    self.num_mss_freq_dist.pop(0, None)
+    print(f'{indent}most freq. memory streams (num, freq):',
+          f'{max(self.num_mss_freq_dist.items(), key=lambda x: x[1])}')
+    print(f'{indent}supported memory streams: {self.num_supported_mss}')
+    if self.num_supported_mss:
+      print(f'{indent}indirect memory streams:', self.num_indirect_supported_mss,
+            f'({self.num_indirect_supported_mss / self.num_supported_mss * 100:.2f}%)')
+    print(f'{indent}total loads: {self.num_loads}')
+    if self.num_loads:
+      print(f'{indent}stream loads:', self.num_stream_loads,
+            f'({self.num_stream_loads / self.num_loads * 100:.2f}%)')
+      if self.num_stream_loads:
+        print(f'{indent}indirect stream loads:', self.num_indirect_stream_loads,
+              f'({self.num_indirect_stream_loads / self.num_stream_loads * 100:.2f}%)')
+    print(f'{indent}total stores: {self.num_stores}')
+    if self.num_stores:
+      print(f'{indent}stream stores:', self.num_stream_stores,
+            f'({self.num_stream_stores / self.num_stores * 100:.2f}%)')
+      if self.num_stream_stores:
+        print(f'{indent}indirect stream stores:', self.num_indirect_stream_stores,
+              f'({self.num_indirect_stream_stores / self.num_stream_stores * 100:.2f}%)')
 
 
 if __name__ == '__main__':
@@ -300,5 +336,7 @@ if __name__ == '__main__':
     path = os.path.join(dir, d)
     (name, ext) = os.path.splitext(d)
     if ext == '.json' and os.path.isfile(path):
-      streams = get_stream_info_list(path)
-      print_info(d, streams)
+      with open(path) as f:
+        streams = list(map(StreamInfo, json.load(f)))
+      print(d)
+      AnalysisResult(streams).print(2)
