@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, TextIO, Optional
 import json
-import sys
 import os
 from dataclasses import dataclass
 
@@ -277,66 +276,95 @@ class AnalysisResult:
     object.__setattr__(self, 'num_indirect_stream_stores',
                        num_indirect_stream_stores)
 
-  def print(self, indent_width: int = 0) -> None:
+  def print(self, file: Optional[TextIO] = None, indent_width: int = 0) -> None:
     '''
     Prints the analysis result.
     '''
+    def p(*args):
+      print(*args, file=file)
     indent = ' ' * indent_width
-    print(f'{indent}num loops: {self.num_loops}')
+    p(f'{indent}num loops: {self.num_loops}')
     if not self.num_loops:
       return
-    print(f'{indent}partially streamizable loops:', self.num_partially_streamizable,
-          f'({self.num_partially_streamizable / self.num_loops * 100:.2f}%)')
-    print(f'{indent}fully streamizable loops:', self.num_fully_streamizable,
-          f'({self.num_fully_streamizable / self.num_loops * 100:.2f}%)')
+    p(f'{indent}partially streamizable loops:', self.num_partially_streamizable,
+      f'({self.num_partially_streamizable / self.num_loops * 100:.2f}%)')
+    p(f'{indent}fully streamizable loops:', self.num_fully_streamizable,
+      f'({self.num_fully_streamizable / self.num_loops * 100:.2f}%)')
     all_streamizable = self.num_partially_streamizable + self.num_fully_streamizable
-    print(f'{indent}streamizable loops:', all_streamizable,
-          f'({all_streamizable / self.num_loops * 100:.2f}%)')
-    print(f'{indent}max induction variable streams:',
-          max(self.num_ivs_freq_dist.keys()))
+    p(f'{indent}streamizable loops:', all_streamizable,
+      f'({all_streamizable / self.num_loops * 100:.2f}%)')
+    p(f'{indent}max induction variable streams:',
+      max(self.num_ivs_freq_dist.keys()))
     self.num_ivs_freq_dist.pop(0, None)
-    print(f'{indent}most freq. induction variable streams (num, freq):',
-          f'{max(self.num_ivs_freq_dist.items(), key=lambda x: x[1])}')
-    print(f'{indent}max induction variable chain length:',
-          max(self.num_iv_chain_len_freq_dist.keys()))
+    p(f'{indent}most freq. induction variable streams (num, freq):',
+      f'{max(self.num_ivs_freq_dist.items(), key=lambda x: x[1])}')
+    p(f'{indent}max induction variable chain length:',
+      max(self.num_iv_chain_len_freq_dist.keys()))
     self.num_iv_chain_len_freq_dist.pop(0, None)
-    print(f'{indent}most freq. induction variable chain (length, freq):',
-          f'{max(self.num_iv_chain_len_freq_dist.items(), key=lambda x: x[1])}')
-    print(f'{indent}max memory streams: {max(self.num_mss_freq_dist.keys())}')
+    p(f'{indent}most freq. induction variable chain (length, freq):',
+      f'{max(self.num_iv_chain_len_freq_dist.items(), key=lambda x: x[1])}')
+    p(f'{indent}max memory streams: {max(self.num_mss_freq_dist.keys())}')
     self.num_mss_freq_dist.pop(0, None)
-    print(f'{indent}most freq. memory streams (num, freq):',
-          f'{max(self.num_mss_freq_dist.items(), key=lambda x: x[1])}')
-    print(f'{indent}supported memory streams: {self.num_supported_mss}')
+    p(f'{indent}most freq. memory streams (num, freq):',
+      f'{max(self.num_mss_freq_dist.items(), key=lambda x: x[1])}')
+    p(f'{indent}supported memory streams: {self.num_supported_mss}')
     if self.num_supported_mss:
-      print(f'{indent}indirect memory streams:', self.num_indirect_supported_mss,
-            f'({self.num_indirect_supported_mss / self.num_supported_mss * 100:.2f}%)')
-    print(f'{indent}total loads: {self.num_loads}')
+      p(f'{indent}indirect memory streams:', self.num_indirect_supported_mss,
+        f'({self.num_indirect_supported_mss / self.num_supported_mss * 100:.2f}%)')
+    p(f'{indent}total loads: {self.num_loads}')
     if self.num_loads:
-      print(f'{indent}stream loads:', self.num_stream_loads,
-            f'({self.num_stream_loads / self.num_loads * 100:.2f}%)')
+      p(f'{indent}stream loads:', self.num_stream_loads,
+        f'({self.num_stream_loads / self.num_loads * 100:.2f}%)')
       if self.num_stream_loads:
-        print(f'{indent}indirect stream loads:', self.num_indirect_stream_loads,
-              f'({self.num_indirect_stream_loads / self.num_stream_loads * 100:.2f}%)')
-    print(f'{indent}total stores: {self.num_stores}')
+        p(f'{indent}indirect stream loads:', self.num_indirect_stream_loads,
+          f'({self.num_indirect_stream_loads / self.num_stream_loads * 100:.2f}%)')
+    p(f'{indent}total stores: {self.num_stores}')
     if self.num_stores:
-      print(f'{indent}stream stores:', self.num_stream_stores,
-            f'({self.num_stream_stores / self.num_stores * 100:.2f}%)')
+      p(f'{indent}stream stores:', self.num_stream_stores,
+        f'({self.num_stream_stores / self.num_stores * 100:.2f}%)')
       if self.num_stream_stores:
-        print(f'{indent}indirect stream stores:', self.num_indirect_stream_stores,
-              f'({self.num_indirect_stream_stores / self.num_stream_stores * 100:.2f}%)')
+        p(f'{indent}indirect stream stores:', self.num_indirect_stream_stores,
+          f'({self.num_indirect_stream_stores / self.num_stream_stores * 100:.2f}%)')
+
+
+def dump_csv(f: TextIO, results: List[AnalysisResult]) -> None:
+  '''
+  Dumps the given results to CSV file.
+  '''
+  pass
 
 
 if __name__ == '__main__':
-  if len(sys.argv) < 2:
-    print(f'usage: {sys.argv[0]} DIRECTORY')
-    exit(1)
+  import argparse
+  import sys
+  parser = argparse.ArgumentParser(
+      description='Analysis for SMX analysis JSON-format output.')
+  parser.add_argument('dir', type=str, help='directory contains JSONs')
+  parser.add_argument('-p', '--print', default=False, action='store_true',
+                      help='print human readable analysis result')
+  parser.add_argument('-o', '--output', type=str, default=None,
+                      help='specify the output file')
 
-  dir = sys.argv[1]
-  for d in sorted(os.listdir(dir)):
-    path = os.path.join(dir, d)
+  args = parser.parse_args()
+  if args.output is None:
+    file = sys.stdout
+  else:
+    file = open(args.output, 'w')
+
+  results = []
+  for d in sorted(os.listdir(args.dir)):
+    path = os.path.join(args.dir, d)
     (name, ext) = os.path.splitext(d)
     if ext == '.json' and os.path.isfile(path):
       with open(path) as f:
         streams = list(map(StreamInfo, json.load(f)))
-      print(d)
-      AnalysisResult(streams).print(2)
+      result = AnalysisResult(streams)
+      if args.print:
+        print(d, file=file)
+        result.print(file=file, indent_width=2)
+      else:
+        results.append(result)
+
+  if not args.print:
+    dump_csv(file, results)
+  file.close()
