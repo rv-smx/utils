@@ -16,6 +16,8 @@ class StreamInfo:
     self.__num_mss = len(info['memStreams'])
     self.__supported_mss = set()
     self.__indirect_supported_mss = set()
+    self.__max_num_iv_factors = 0
+    self.__max_num_ms_factors = 0
     self.__supported_ivs = set()
     self.__check_mss(info)
     # check induction variable streams
@@ -69,9 +71,16 @@ class StreamInfo:
     self.__supported_mss.add(name)
     if is_indirect:
       self.__indirect_supported_mss.add(name)
+    num_iv_factors = 0
+    num_ms_factors = 0
     for factor in ms['factors']:
       if factor['depStreamKind'] == 'inductionVariable':
+        num_iv_factors += 1
         self.__supported_ivs.add(factor['depStream'])
+      elif factor['depStreamKind'] == 'memory':
+        num_ms_factors += 1
+    self.__max_num_iv_factors = max(self.__max_num_iv_factors, num_iv_factors)
+    self.__max_num_ms_factors = max(self.__max_num_ms_factors, num_ms_factors)
     return True
 
   def __check_ivs(self, info: Dict[str, Any]) -> None:
@@ -153,6 +162,20 @@ class StreamInfo:
     return len(self.__indirect_supported_mss)
 
   @property
+  def max_num_iv_factors(self) -> int:
+    '''
+    Returns the maximum number of induction variable stream factors.
+    '''
+    return self.__max_num_iv_factors
+
+  @property
+  def max_num_ms_factors(self) -> int:
+    '''
+    Returns the maximum number of memory stream factors.
+    '''
+    return self.__max_num_ms_factors
+
+  @property
   def num_loads(self) -> int:
     '''
     Returns the number of load operations.
@@ -212,12 +235,16 @@ class AnalysisResult:
   num_stores: int
   num_stream_stores: int
   num_indirect_stream_stores: int
-  max_num_ivs: int = 0
+  max_ivs_num_freq: Tuple[int, int] = (0, 0)
   most_freq_ivs: Tuple[int, int] = (0, 0)
-  max_iv_chain_len: int = 0
+  max_iv_chain_len_freq: Tuple[int, int] = (0, 0)
   most_freq_iv_chain_lens: Tuple[int, int] = (0, 0)
-  max_num_mss: int = 0
+  max_mss_num_freq: Tuple[int, int] = (0, 0)
   most_freq_mss: Tuple[int, int] = (0, 0)
+  max_iv_factors_num_freq: Tuple[int, int] = (0, 0)
+  most_freq_iv_factors: Tuple[int, int] = (0, 0)
+  max_ms_factors_num_freq: Tuple[int, int] = (0, 0)
+  most_freq_ms_factors: Tuple[int, int] = (0, 0)
 
   def __init__(self, streams: List[StreamInfo]) -> None:
     num_loops = len(streams)
@@ -226,6 +253,8 @@ class AnalysisResult:
     num_ivs_freq_dist = {}
     num_iv_chain_len_freq_dist = {}
     num_mss_freq_dist = {}
+    num_iv_factor_freq_dist = {}
+    num_ms_factor_freq_dist = {}
     num_supported_mss = 0
     num_indirect_supported_mss = 0
     num_loads = 0
@@ -248,6 +277,10 @@ class AnalysisResult:
       num_iv_chain_len_freq_dist[stream.max_iv_chain_len] = prev + 1
       prev = num_mss_freq_dist.setdefault(stream.num_supported_mss, 0)
       num_mss_freq_dist[stream.num_supported_mss] = prev + 1
+      prev = num_iv_factor_freq_dist.setdefault(stream.max_num_iv_factors, 0)
+      num_iv_factor_freq_dist[stream.max_num_iv_factors] = prev + 1
+      prev = num_ms_factor_freq_dist.setdefault(stream.max_num_ms_factors, 0)
+      num_ms_factor_freq_dist[stream.max_num_ms_factors] = prev + 1
       # indirect memory streams percentage
       num_supported_mss += stream.num_supported_mss
       num_indirect_supported_mss += stream.num_indirect_supported_mss
@@ -264,21 +297,40 @@ class AnalysisResult:
                        num_partially_streamizable)
     object.__setattr__(self, 'num_fully_streamizable', num_fully_streamizable)
     if len(num_ivs_freq_dist):
-      object.__setattr__(self, 'max_num_ivs', max(num_ivs_freq_dist.keys()))
+      object.__setattr__(self, 'max_ivs_num_freq',
+                         max(num_ivs_freq_dist.items(), key=lambda x: x[0]))
       num_ivs_freq_dist.pop(0, None)
+    if len(num_ivs_freq_dist):
       object.__setattr__(self, 'most_freq_ivs',
                          max(num_ivs_freq_dist.items(), key=lambda x: x[1]))
     if len(num_iv_chain_len_freq_dist):
-      object.__setattr__(self, 'max_iv_chain_len',
-                         max(num_iv_chain_len_freq_dist.keys()))
+      object.__setattr__(self, 'max_iv_chain_len_freq',
+                         max(num_iv_chain_len_freq_dist.items(), key=lambda x: x[0]))
       num_iv_chain_len_freq_dist.pop(0, None)
+    if len(num_iv_chain_len_freq_dist):
       object.__setattr__(self, 'most_freq_iv_chain_lens',
                          max(num_iv_chain_len_freq_dist.items(), key=lambda x: x[1]))
     if len(num_mss_freq_dist):
-      object.__setattr__(self, 'max_num_mss', max(num_mss_freq_dist.keys()))
+      object.__setattr__(self, 'max_mss_num_freq',
+                         max(num_mss_freq_dist.items(), key=lambda x: x[0]))
       num_mss_freq_dist.pop(0, None)
+    if len(num_mss_freq_dist):
       object.__setattr__(self, 'most_freq_mss',
                          max(num_mss_freq_dist.items(), key=lambda x: x[1]))
+    if len(num_iv_factor_freq_dist):
+      object.__setattr__(self, 'max_iv_factors_num_freq',
+                         max(num_iv_factor_freq_dist.items(), key=lambda x: x[0]))
+      num_iv_factor_freq_dist.pop(0, None)
+    if len(num_iv_factor_freq_dist):
+      object.__setattr__(self, 'most_freq_iv_factors',
+                         max(num_iv_factor_freq_dist.items(), key=lambda x: x[1]))
+    if len(num_ms_factor_freq_dist):
+      object.__setattr__(self, 'max_ms_factors_num_freq',
+                         max(num_ms_factor_freq_dist.items(), key=lambda x: x[0]))
+      num_ms_factor_freq_dist.pop(0, None)
+    if len(num_ms_factor_freq_dist):
+      object.__setattr__(self, 'most_freq_ms_factors',
+                         max(num_ms_factor_freq_dist.items(), key=lambda x: x[1]))
     object.__setattr__(self, 'num_supported_mss', num_supported_mss)
     object.__setattr__(self, 'num_indirect_supported_mss',
                        num_indirect_supported_mss)
@@ -308,14 +360,24 @@ class AnalysisResult:
     all_streamizable = self.num_partially_streamizable + self.num_fully_streamizable
     p(f'{indent}streamizable loops:', all_streamizable,
       f'({all_streamizable / self.num_loops * 100:.2f}%)')
-    p(f'{indent}max induction variable streams: {self.max_num_ivs}')
-    p(f'{indent}most freq. induction variable streams (num, freq):',
+    p(f'{indent}max induction variable streams (num, freq):',
+      self.max_ivs_num_freq)
+    p(f'{indent}most freq induction variable streams (num, freq):',
       f'{self.most_freq_ivs}')
-    p(f'{indent}max induction variable chain length: {self.max_iv_chain_len}')
-    p(f'{indent}most freq. induction variable chain (length, freq):',
+    p(f'{indent}max induction variable chain (length, freq):',
+      self.max_iv_chain_len_freq)
+    p(f'{indent}most freq induction variable chain (length, freq):',
       f'{self.most_freq_iv_chain_lens}')
-    p(f'{indent}max memory streams: {self.max_num_mss}')
-    p(f'{indent}most freq. memory streams (num, freq): {self.most_freq_mss}')
+    p(f'{indent}max memory streams (num, freq): {self.max_mss_num_freq}')
+    p(f'{indent}most freq memory streams (num, freq): {self.most_freq_mss}')
+    p(f'{indent}max induction variable stream factors (num, freq):',
+      self.max_iv_factors_num_freq)
+    p(f'{indent}most freq induction variable stream factors (num, freq):',
+      self.most_freq_iv_factors)
+    p(f'{indent}max memory stream factors (num, freq):',
+      self.max_ms_factors_num_freq)
+    p(f'{indent}most freq memory stream factors (num, freq):',
+      self.most_freq_ms_factors)
     p(f'{indent}supported memory streams: {self.num_supported_mss}')
     if self.num_supported_mss:
       p(f'{indent}indirect memory streams:', self.num_indirect_supported_mss,
@@ -342,23 +404,38 @@ def dump_csv(f: TextIO, results: Dict[str, AnalysisResult]) -> None:
   '''
   print('name', 'num loops', 'partially streamizable loops',
         'fully streamizable loops', 'streamizable loops',
-        'max induction variable streams', 'most freq induction variable streams',
+        'max induction variable streams', 'max induction variable streams freq',
+        'most freq induction variable streams',
         'most freq induction variable streams freq',
         'max induction variable chain length',
+        'max induction variable chain length freq',
         'most freq induction variable chain length',
         'most freq induction variable chain freq', 'max memory streams',
-        'most freq memory streams', 'most freq memory streams freq',
-        'supported memory streams', 'indirect memory streams', 'total loads',
-        'stream loads', 'indirect stream loads', 'total stores', 'stream stores',
+        'max memory streams freq', 'most freq memory streams',
+        'most freq memory streams freq', 'max induction variable stream factors',
+        'max induction variable stream factors freq',
+        'most freq induction variable stream factors',
+        'most freq induction variable stream factors freq',
+        'max memory stream factors', 'max memory stream factors freq',
+        'most freq memory stream factors',
+        'most freq memory stream factors freq', 'supported memory streams',
+        'indirect memory streams', 'total loads', 'stream loads',
+        'indirect stream loads', 'total stores', 'stream stores',
         'indirect stream stores', sep=',', file=f)
   for name, result in results.items():
     print(name, result.num_loops, result.num_partially_streamizable,
           result.num_fully_streamizable,
           result.num_partially_streamizable + result.num_fully_streamizable,
-          result.max_num_ivs, result.most_freq_ivs[0], result.most_freq_ivs[1],
-          result.max_iv_chain_len, result.most_freq_iv_chain_lens[0],
-          result.most_freq_iv_chain_lens[1], result.max_num_mss,
+          result.max_ivs_num_freq[0], result.max_ivs_num_freq[1],
+          result.most_freq_ivs[0], result.most_freq_ivs[1],
+          result.max_iv_chain_len_freq[0], result.max_iv_chain_len_freq[1],
+          result.most_freq_iv_chain_lens[0], result.most_freq_iv_chain_lens[1],
+          result.max_mss_num_freq[0], result.max_mss_num_freq[1],
           result.most_freq_mss[0], result.most_freq_mss[1],
+          result.max_iv_factors_num_freq[0], result.max_iv_factors_num_freq[1],
+          result.most_freq_iv_factors[0], result.most_freq_iv_factors[1],
+          result.max_ms_factors_num_freq[0], result.max_ms_factors_num_freq[1],
+          result.most_freq_ms_factors[0], result.most_freq_ms_factors[1],
           result.num_supported_mss, result.num_indirect_supported_mss,
           result.num_loads, result.num_stream_loads,
           result.num_indirect_stream_loads, result.num_stores,
@@ -392,10 +469,10 @@ if __name__ == '__main__':
         streams = list(map(StreamInfo, json.load(f)))
       result = AnalysisResult(streams)
       if args.print:
-        print(d, file=file)
+        print(name, file=file)
         result.print(file=file, indent_width=2)
       else:
-        results[d] = result
+        results[name] = result
 
   if not args.print:
     dump_csv(file, results)
