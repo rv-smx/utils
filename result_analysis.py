@@ -18,6 +18,7 @@ class StreamInfo:
     self.__indirect_supported_mss = set()
     self.__max_num_iv_factors = 0
     self.__max_num_ms_factors = 0
+    self.__max_stride = 0
     self.__supported_ivs = set()
     self.__check_mss(info)
     # check induction variable streams
@@ -79,6 +80,7 @@ class StreamInfo:
         self.__supported_ivs.add(factor['depStream'])
       elif factor['depStreamKind'] == 'memory':
         num_ms_factors += 1
+      self.__max_stride = max(self.__max_stride, factor['stride'])
     self.__max_num_iv_factors = max(self.__max_num_iv_factors, num_iv_factors)
     self.__max_num_ms_factors = max(self.__max_num_ms_factors, num_ms_factors)
     return True
@@ -176,6 +178,13 @@ class StreamInfo:
     return self.__max_num_ms_factors
 
   @property
+  def max_stride(self) -> int:
+    '''
+    Returns the maximum stride of address factor.
+    '''
+    return self.__max_stride
+
+  @property
   def num_loads(self) -> int:
     '''
     Returns the number of load operations.
@@ -227,6 +236,7 @@ class AnalysisResult:
   num_loops: int
   num_partially_streamizable: int
   num_fully_streamizable: int
+  max_stride: int
   num_supported_mss: int
   num_indirect_supported_mss: int
   num_loads: int
@@ -255,6 +265,7 @@ class AnalysisResult:
     num_mss_freq_dist = {}
     num_iv_factor_freq_dist = {}
     num_ms_factor_freq_dist = {}
+    max_stride = 0
     num_supported_mss = 0
     num_indirect_supported_mss = 0
     num_loads = 0
@@ -281,6 +292,8 @@ class AnalysisResult:
       num_iv_factor_freq_dist[stream.max_num_iv_factors] = prev + 1
       prev = num_ms_factor_freq_dist.setdefault(stream.max_num_ms_factors, 0)
       num_ms_factor_freq_dist[stream.max_num_ms_factors] = prev + 1
+      # stride of address factor
+      max_stride = max(max_stride, stream.max_stride)
       # indirect memory streams percentage
       num_supported_mss += stream.num_supported_mss
       num_indirect_supported_mss += stream.num_indirect_supported_mss
@@ -331,6 +344,7 @@ class AnalysisResult:
     if len(num_ms_factor_freq_dist):
       object.__setattr__(self, 'most_freq_ms_factors',
                          max(num_ms_factor_freq_dist.items(), key=lambda x: x[1]))
+    object.__setattr__(self, 'max_stride', max_stride)
     object.__setattr__(self, 'num_supported_mss', num_supported_mss)
     object.__setattr__(self, 'num_indirect_supported_mss',
                        num_indirect_supported_mss)
@@ -378,6 +392,7 @@ class AnalysisResult:
       self.max_ms_factors_num_freq)
     p(f'{indent}most freq memory stream factors (num, freq):',
       self.most_freq_ms_factors)
+    p(f'{indent}max stride: {self.max_stride}')
     p(f'{indent}supported memory streams: {self.num_supported_mss}')
     if self.num_supported_mss:
       p(f'{indent}indirect memory streams:', self.num_indirect_supported_mss,
@@ -418,9 +433,9 @@ def dump_csv(f: TextIO, results: Dict[str, AnalysisResult]) -> None:
         'most freq induction variable stream factors freq',
         'max memory stream factors', 'max memory stream factors freq',
         'most freq memory stream factors',
-        'most freq memory stream factors freq', 'supported memory streams',
-        'indirect memory streams', 'total loads', 'stream loads',
-        'indirect stream loads', 'total stores', 'stream stores',
+        'most freq memory stream factors freq', 'max stride',
+        'supported memory streams', 'indirect memory streams', 'total loads',
+        'stream loads', 'indirect stream loads', 'total stores', 'stream stores',
         'indirect stream stores', sep=',', file=f)
   for name, result in results.items():
     print(name, result.num_loops, result.num_partially_streamizable,
@@ -436,11 +451,11 @@ def dump_csv(f: TextIO, results: Dict[str, AnalysisResult]) -> None:
           result.most_freq_iv_factors[0], result.most_freq_iv_factors[1],
           result.max_ms_factors_num_freq[0], result.max_ms_factors_num_freq[1],
           result.most_freq_ms_factors[0], result.most_freq_ms_factors[1],
-          result.num_supported_mss, result.num_indirect_supported_mss,
-          result.num_loads, result.num_stream_loads,
-          result.num_indirect_stream_loads, result.num_stores,
-          result.num_stream_stores, result.num_indirect_stream_stores,
-          sep=',', file=f)
+          result.max_stride, result.num_supported_mss,
+          result.num_indirect_supported_mss, result.num_loads,
+          result.num_stream_loads, result.num_indirect_stream_loads,
+          result.num_stores, result.num_stream_stores,
+          result.num_indirect_stream_stores, sep=',', file=f)
 
 
 if __name__ == '__main__':
