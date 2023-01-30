@@ -38,7 +38,7 @@ if __name__ == '__main__':
 
   # define the location query function
   def query(addr: int) -> str:
-    ret = subprocess.run(['addr2line', '-e', bin, hex(addr)],
+    ret = subprocess.run(['addr2line', '-e', bin, hex(addr - 1)],
                          capture_output=True, text=True)
     return 'Unknown' if ret.returncode else ret.stdout.strip()
 
