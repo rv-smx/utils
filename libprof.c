@@ -235,15 +235,14 @@ static void __attribute__((destructor)) cleanup_all() {
 
 /// Loop profiler enter function.
 void __attribute__((noinline)) __loop_profile_func_enter() {
-  // Read performance data.
-  read_format_t rf;
-  read_assert(perf_fds[0], &rf, sizeof(rf));
   // Allocate space on stack.
   g_array_set_size(perf_data_stack, perf_data_stack->len + 1);
   ad_pair_t *pair =
       (ad_pair_t *)perf_data_stack->data + perf_data_stack->len - 1;
   // Write address-data pair to stack.
   pair->addr = __builtin_extract_return_addr(__builtin_return_address(0));
+  read_format_t rf;
+  read_assert(perf_fds[0], &rf, sizeof(rf));
   fill_perf_data(&pair->data, &rf);
 }
 
