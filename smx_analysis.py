@@ -199,7 +199,7 @@ if __name__ == '__main__':
       exit(-1)
 
   if args.dir is None:
-    result = analyse_root(args.root, out_dir, config, args.lib)
+    analyse_root(args.root, out_dir, config, args.lib)
   else:
     dir_path = path.join(args.root, args.dir)
     if not path.isdir(dir_path):
