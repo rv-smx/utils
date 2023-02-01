@@ -9,6 +9,7 @@
     "cpp": "clang++ --target=riscv64-unknown-linux-elf -march=rv64gc_xsmx -g -O3 -c -S -emit-llvm -DSPEC_CPU -DSPEC_CPU_LP64 -I. -std=c++03",
     "fortran": "flang-new -O3 -c -S -emit-llvm -DSPEC_CPU_LP64 -I."
   },
+  "linker": "clang++ -lm",
   "directoryConfigs": {
     "400.perlbench": {
       "flags": {
