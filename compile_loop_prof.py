@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-from smx_analysis import CompilationConfig, run_or_fail, eprint
+from typing import Optional
+from smx_analysis import CompilationConfig, RunCommandError, run_or_fail, eprint, log_temp, walk_files
 import tempfile
 import uuid
 import os
@@ -9,17 +10,25 @@ import functools
 
 
 def compile_src(src_file: str, dir: str, config: CompilationConfig,
-                smx_lib: str, pic: bool) -> str:
+                smx_lib: str, pic: bool) -> Optional[str]:
   '''
-  Compiles the given source file and returns
-  the path to the compiled object file.
+  Compiles the given source file.
+  
+  Returns the path to the compiled object file on success,
+  otherwise `None`.
   '''
   # compile to LLVM IR
   ll = config.compile(dir, src_file)
   # insert profiling functions
   loop_profiler_flags = f'-load-pass-plugin={smx_lib} -passes=loop-profiler'
   ll_simplified = run_or_fail(f'opt -S -loop-simplify', stdin=ll)
-  ll_prof = run_or_fail(f'opt -S {loop_profiler_flags}', stdin=ll_simplified)
+  try:
+    ll_prof = run_or_fail(f'opt -S {loop_profiler_flags}', stdin=ll_simplified)
+  except RunCommandError as e:
+    temp = log_temp(ll_simplified, prefix='lp-', suffix='.ll')
+    eprint('Error occurred when running loop profiler pass!')
+    eprint(f'The LLVM IR file has already been dumped to "{temp}".')
+    return None
   # compile to object
   pic_flag = '-relocation-model=pic' if pic else ''
   obj_file = os.path.join(tempfile.gettempdir(), f'{uuid.uuid1()}.o')
@@ -36,18 +45,26 @@ def compile_dir(dir_name: str, dir: str, exe_file: str, config: CompilationConfi
   # scan for all source files
   src_files = []
   dir = os.path.abspath(dir)
-  for root, _, files in os.walk(dir):
+  for root, files in walk_files(config, dir_name, dir):
     for f in files:
       if config.is_source(dir_name, f):
         src_files.append(os.path.abspath(os.path.join(root, f)))
+  if not src_files:
+    return
   # compile to object files
   with multiprocessing.Pool() as p:
     f = functools.partial(compile_src, dir=dir,
                           config=config, smx_lib=smx_lib, pic=pic)
-    objs = p.map(f, src_files)
+    objs = []
+    for obj in p.map(f, src_files):
+      if obj is None:
+        raise RuntimeError(f'failed to compile "{dir_name}"')
+      else:
+        objs.append(obj)
   # link to executable
-  obj_list = ' '.join(objs)
-  run_or_fail(f'clang {obj_list} {libprof} -o {exe_file}')
+  config.link(objs, exe_file, flags=libprof)
+  for obj in objs:
+    os.remove(obj)
 
 
 def compile_root(root: str, out_dir: str, config: CompilationConfig,
@@ -56,16 +73,18 @@ def compile_root(root: str, out_dir: str, config: CompilationConfig,
   Compiles the given root directory
   and save the compiled executable to the output directory.
   '''
-  dirs = os.listdir(root)
-  for i, dir in enumerate(dirs):
+  dirs = []
+  for dir in os.listdir(root):
     dir_path = os.path.join(root, dir)
     if os.path.isdir(dir_path):
-      exe_file = os.path.join(out_dir, dir)
-      if os.path.exists(exe_file):
-        eprint(f'[{i + 1}/{len(dirs)}] Skipped "{dir}"')
-      else:
-        eprint(f'[{i + 1}/{len(dirs)}] Compiling "{dir}" ...')
-        compile_dir(dir, dir_path, exe_file, config, smx_lib, libprof, pic)
+      dirs.append((dir, dir_path))
+  for i, (dir, dir_path) in enumerate(dirs):
+    exe_file = os.path.join(out_dir, dir)
+    if os.path.exists(exe_file):
+      eprint(f'[{i + 1}/{len(dirs)}] Skipped "{dir}"')
+    else:
+      eprint(f'[{i + 1}/{len(dirs)}] Compiling "{dir}" ...')
+      compile_dir(dir, dir_path, exe_file, config, smx_lib, libprof, pic)
 
 
 if __name__ == '__main__':
@@ -78,9 +97,9 @@ if __name__ == '__main__':
   parser.add_argument('-sl', '--smx-lib', type=str, required=True,
                       help='SMX transforms library')
   parser.add_argument('-pl', '--libprof', type=str, required=True,
-                      help='Profiling library')
+                      help='profiling library')
   parser.add_argument('-pic', default=False, action='store_true',
-                      help='Generate PIC')
+                      help='generate PIC')
   parser.add_argument('-d', '--dir', type=str, default=None,
                       help='specify the directory to compile')
   parser.add_argument('-o', '--output', type=str, default=None,
