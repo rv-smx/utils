@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Tuple, Iterator
 import subprocess
 import shlex
 import os
@@ -10,6 +10,7 @@ import sys
 import tempfile
 import multiprocessing
 import functools
+from queue import Queue
 
 
 class RunCommandError(Exception):
@@ -74,6 +75,17 @@ class CompilationConfig:
         return False
     return True
 
+  def should_ignore_dir(self, dir_name: str, root: str, dir: str) -> bool:
+    '''
+    Returns `True` if the given directory should be ignored.
+    '''
+    ignore = self.__dir_config(dir_name).get('ignore', {})
+    dir = path.abspath(path.join(root, dir))
+    for d in ignore.get('directories', []):
+      if dir == path.abspath(path.join(root, d)):
+        return True
+    return False
+
   def compile(self, cwd: str, src_file: str) -> str:
     '''
     Compiles the given source file to LLVM IR file.
@@ -85,6 +97,15 @@ class CompilationConfig:
     cmd = self.__get_compile_cmd(dir_name, ext)
     return run_or_fail(f'{cmd} {src_file} -o -', cwd=cwd)
 
+  def link(self, objs: List[str], exe_file: str, cwd: Optional[str] = None,
+           flags: str = '') -> None:
+    '''
+    Linkes the given object files to executable.
+    '''
+    obj_list = ' '.join(objs)
+    cmd = self.__config['linker']
+    run_or_fail(f'{cmd} {flags} {obj_list} -o {exe_file}', cwd=cwd)
+
 
 def eprint(*args, **kwargs) -> None:
   '''
@@ -94,14 +115,39 @@ def eprint(*args, **kwargs) -> None:
   sys.stderr.flush()
 
 
-def log_temp(content: str, suffix: Optional[str] = None) -> str:
+def log_temp(content: str, prefix: str = 'smxa-',
+             suffix: Optional[str] = None) -> str:
   '''
   Logs the given content to a temporary file, returns the file name.
   '''
-  fd, temp = tempfile.mkstemp(prefix='smxa-', suffix=suffix, dir='.')
+  fd, temp = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir='.')
   with os.fdopen(fd, 'w') as f:
     f.write(content)
   return temp
+
+
+def walk_files(config: CompilationConfig, dir_name: str,
+               root: str) -> Iterator[Tuple[str, List[str]]]:
+  '''
+  Walks the given root directory, ignores directories that
+  marked as ignored in the configuration.
+
+  Returns an iterator of tuple of current root and file list.
+  '''
+  q = Queue()
+  q.put('.')
+  while not q.empty():
+    cur_root = q.get()
+    full_root = path.join(root, cur_root)
+    files = []
+    for f in os.listdir(full_root):
+      if path.isfile(path.join(full_root, f)):
+        files.append(f)
+      else:
+        next_root = path.join(cur_root, f)
+        if not config.should_ignore_dir(dir_name, root, next_root):
+          q.put(next_root)
+    yield (full_root, files)
 
 
 def analyse(ll: str, smx_lib: str) -> List[Any]:
@@ -116,7 +162,7 @@ def analyse(ll: str, smx_lib: str) -> List[Any]:
   except RunCommandError as e:
     temp = log_temp(ll, suffix='.ll')
     eprint('Error occurred when running SMX analysis!')
-    eprint(f'The LLVM IR file has already benn dumped to "{temp}".')
+    eprint(f'The LLVM IR file has already been dumped to "{temp}".')
     raise e
   result = []
   try:
@@ -125,7 +171,7 @@ def analyse(ll: str, smx_lib: str) -> List[Any]:
   except json.JSONDecodeError as e:
     temp = log_temp(out, suffix='.json')
     eprint('Error occurred when parsing JSON result!')
-    eprint(f'The analysis output has already benn dumped to "{temp}".')
+    eprint(f'The analysis output has already been dumped to "{temp}".')
     raise e
   return result
 
@@ -145,7 +191,7 @@ def analyse_dir(dir_name: str, dir: str, config: CompilationConfig, smx_lib: str
   '''
   src_files = []
   dir = path.abspath(dir)
-  for root, _, files in os.walk(dir):
+  for root, files in walk_files(config, dir_name, dir):
     for f in files:
       if config.is_source(dir_name, f):
         src_files.append(path.abspath(path.join(root, f)))
@@ -160,18 +206,20 @@ def analyse_root(root: str, out_dir: str, config: CompilationConfig, smx_lib: st
   Analyses the given root directory
   and save results to the give output directory.
   '''
-  dirs = os.listdir(root)
-  for i, dir in enumerate(dirs):
+  dirs = []
+  for dir in os.listdir(root):
     dir_path = path.join(root, dir)
     if path.isdir(dir_path):
-      out_file = path.join(out_dir, f'{dir}.json')
-      if path.exists(out_file):
-        eprint(f'[{i + 1}/{len(dirs)}] Skipped "{dir}"')
-      else:
-        eprint(f'[{i + 1}/{len(dirs)}] Analysing "{dir}" ...')
-        result = analyse_dir(dir, dir_path, config, smx_lib)
-        with open(out_file, 'w') as f:
-          json.dump(result, f)
+      dirs.append((dir, dir_path))
+  for i, (dir, dir_path) in enumerate(dirs):
+    out_file = path.join(out_dir, f'{dir}.json')
+    if path.exists(out_file):
+      eprint(f'[{i + 1}/{len(dirs)}] Skipped "{dir}"')
+    else:
+      eprint(f'[{i + 1}/{len(dirs)}] Analysing "{dir}" ...')
+      result = analyse_dir(dir, dir_path, config, smx_lib)
+      with open(out_file, 'w') as f:
+        json.dump(result, f)
 
 
 if __name__ == '__main__':
