@@ -47,7 +47,6 @@ if __name__ == '__main__':
     # get relocation
     rel_data = f.read(RELOCATION_LEN)
     rel = unpack_relocation(rel_data)[0]
-    print(hex(rel))
     # print records
     i = 0
     while data := f.read(RECORD_LEN):
