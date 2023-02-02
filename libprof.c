@@ -170,7 +170,7 @@ static void free_loop_data(loop_data_t *data) {
 /// Initializes loop data table.
 static void init_loop_data_table() {
   loop_data_table = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
-                                          (GDestoryNotify)free_loop_data);
+                                          (GDestroyNotify)free_loop_data);
 }
 
 /// Performs cleanup for performance events.
@@ -250,6 +250,7 @@ static loop_data_t *find_or_insert_loop_data(void *addr) {
     data->perf_data_stack = g_array_new(FALSE, FALSE, sizeof(perf_data_t));
     data->has_prof_data = false;
     g_hash_table_insert(loop_data_table, addr, data);
+    return data;
   }
 }
 
