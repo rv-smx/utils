@@ -2,6 +2,8 @@
 // A simple profiling library for the loop profiler
 // to profile cache read/write MPKI for all loops.
 //
+// This library can not be used in multi-threaded programs.
+//
 // By MaxXing.
 //============================================================
 
@@ -12,6 +14,7 @@
 #include <inttypes.h>
 #include <link.h>
 #include <linux/perf_event.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,17 +41,18 @@ typedef struct {
   uint64_t values[LEN_PERF_EVENTS];
 } perf_data_t;
 
-/// Address-data pair.
-typedef struct {
-  void *addr;
-  perf_data_t data;
-} ad_pair_t;
-
 /// Profiling data.
 typedef struct {
   double read_mpki;
   double write_mpki;
 } prof_data_t;
+
+/// Loop data.
+typedef struct {
+  GArray *perf_data_stack;
+  prof_data_t prof_data;
+  bool has_prof_data;
+} loop_data_t;
 
 /// Performance event configurations.
 static const struct {
@@ -129,11 +133,8 @@ static uintptr_t get_relocation() { return _r_debug.r_map->l_addr; }
 /// File descriptors of all performance events.
 static int perf_fds[LEN_PERF_EVENTS];
 
-/// Performance data stack.
-GArray *perf_data_stack;
-
-/// Hash table for per loop performance data.
-GHashTable *loop_profs;
+/// Hash table for loop data.
+static GHashTable *loop_data_table;
 
 /// Initializes performance events.
 static void init_perf_events() {
@@ -160,10 +161,16 @@ static void init_perf_events() {
   ioctl(perf_fds[0], PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP);
 }
 
-/// Initializes stack and hash table.
-static void init_stack_hash() {
-  perf_data_stack = g_array_new(FALSE, FALSE, sizeof(ad_pair_t));
-  loop_profs = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, free);
+/// Frees the given loop data.
+static void free_loop_data(loop_data_t *data) {
+  g_array_free(data->perf_data_stack, TRUE);
+  free(data);
+}
+
+/// Initializes loop data table.
+static void init_loop_data_table() {
+  loop_data_table = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+                                          (GDestoryNotify)free_loop_data);
 }
 
 /// Performs cleanup for performance events.
@@ -196,84 +203,99 @@ static int open_output_file() {
   return fd;
 }
 
-/// Writes the given loop performance data information to the output file.
-static void write_loop_perf(void *addr, const prof_data_t *data, int *fd) {
+/// Writes the given loop profiling data information to the output file.
+static void write_loop_prof(void *addr, const loop_data_t *data, int *fd) {
   // Write return address.
   write_assert(*fd, &addr, sizeof(addr));
-  // Write performance data.
-  write_assert(*fd, data, sizeof(prof_data_t));
+  // Write profiling data.
+  write_assert(*fd, &data->prof_data, sizeof(prof_data_t));
 }
 
-/// Performs cleanup for stack and hash table.
-static void cleanup_stack_hash() {
-  // Free the stack.
-  if (perf_data_stack->len) PANIC("Performance data stack is not empty!");
-  g_array_free(perf_data_stack, FALSE);
+/// Performs cleanup for loop data table.
+static void cleanup_loop_data_table() {
   // Write the content of the hash table to the output file.
   int fd = open_output_file();
-  g_hash_table_foreach(loop_profs, (GHFunc)write_loop_perf, &fd);
+  g_hash_table_foreach(loop_data_table, (GHFunc)write_loop_prof, &fd);
   close(fd);
   // Destory the hash table.
-  g_hash_table_destroy(loop_profs);
+  g_hash_table_destroy(loop_data_table);
 }
 
 /// Initializes the program.
 static void __attribute__((constructor)) init_all() {
   init_perf_events();
-  init_stack_hash();
+  init_loop_data_table();
 }
 
 /// Performs cleanup for the program.
 static void __attribute__((destructor)) cleanup_all() {
   cleanup_perf_events();
-  cleanup_stack_hash();
+  cleanup_loop_data_table();
 }
 
 //============================================================
 // Profiling Functions
 //============================================================
 
+/// Finds the given loop data from the hash table by the given address,
+/// inserts a new entry to the hash table if not found.
+///
+/// Returns a pointer to the loop data.
+static loop_data_t *find_or_insert_loop_data(void *addr) {
+  loop_data_t *data = (loop_data_t *)g_hash_table_lookup(loop_data_table, addr);
+  if (LIKELY(data)) {
+    return data;
+  } else {
+    loop_data_t *data = malloc(sizeof(loop_data_t));
+    data->perf_data_stack = g_array_new(FALSE, FALSE, sizeof(perf_data_t));
+    data->has_prof_data = false;
+    g_hash_table_insert(loop_data_table, addr, data);
+  }
+}
+
 /// Loop profiler enter function.
-void __attribute__((noinline)) __loop_profile_func_enter() {
+///
+/// This function is marked as `noinline` because it calls
+/// `__builtin_return_address`.
+void *__attribute__((noinline)) __loop_profile_func_enter() {
+  // Get the corresponding loop data.
+  void *addr = __builtin_extract_return_addr(__builtin_return_address(0));
+  loop_data_t *loop_data = find_or_insert_loop_data(addr);
   // Allocate space on stack.
-  g_array_set_size(perf_data_stack, perf_data_stack->len + 1);
-  ad_pair_t *pair =
-      (ad_pair_t *)perf_data_stack->data + perf_data_stack->len - 1;
-  // Write address-data pair to stack.
-  pair->addr = __builtin_extract_return_addr(__builtin_return_address(0));
+  GArray *stack = loop_data->perf_data_stack;
+  g_array_set_size(stack, stack->len + 1);
+  perf_data_t *perf_data = (perf_data_t *)stack->data + stack->len - 1;
+  // Write performance data to stack.
   read_format_t rf;
   read_assert(perf_fds[0], &rf, sizeof(rf));
-  fill_perf_data(&pair->data, &rf);
+  fill_perf_data(perf_data, &rf);
+  return addr;
 }
 
 /// Loop profiler exit function.
-void __loop_profile_func_exit() {
+void __loop_profile_func_exit(void *addr) {
   // Read performance data.
   read_format_t rf;
   read_assert(perf_fds[0], &rf, sizeof(rf));
   perf_data_t perf_data;
   fill_perf_data(&perf_data, &rf);
-  // Get data-address pair from stack.
-  if (UNLIKELY(!perf_data_stack->len)) {
-    PANIC("Performance data stack is empty!");
-  }
-  ad_pair_t *pair =
-      (ad_pair_t *)perf_data_stack->data + perf_data_stack->len - 1;
-  // Get profiling data.
-  prof_data_t prof_data;
-  fill_prof_data(&prof_data, &pair->data, &perf_data);
-  // Find profiling data from hash table.
-  prof_data_t *data =
-      (prof_data_t *)g_hash_table_lookup(loop_profs, pair->addr);
-  if (LIKELY(data)) {
-    // Update the profiling data.
-    add_prof_data(data, &prof_data);
+  // Get the corresponding loop data.
+  loop_data_t *loop_data =
+      (loop_data_t *)g_hash_table_lookup(loop_data_table, addr);
+  if (UNLIKELY(!loop_data)) PANIC("Loop data not found!");
+  // Get performance data from stack.
+  GArray *stack = loop_data->perf_data_stack;
+  if (UNLIKELY(!stack->len)) PANIC("Performance data stack is empty!");
+  perf_data_t *prev_perf_data = (perf_data_t *)stack->data + stack->len - 1;
+  // Update the profiling data.
+  if (LIKELY(loop_data->has_prof_data)) {
+    prof_data_t prof_data;
+    fill_prof_data(&prof_data, prev_perf_data, &perf_data);
+    add_prof_data(&loop_data->prof_data, &prof_data);
   } else {
-    // Make a new profiling data.
-    prof_data_t *data = malloc(sizeof(prof_data_t));
-    memcpy(data, &prof_data, sizeof(prof_data_t));
-    g_hash_table_insert(loop_profs, pair->addr, data);
+    fill_prof_data(&loop_data->prof_data, prev_perf_data, &perf_data);
+    loop_data->has_prof_data = true;
   }
-  // Pop data-address pair from stack.
-  g_array_set_size(perf_data_stack, perf_data_stack->len - 1);
+  // Pop performance data from stack.
+  g_array_set_size(stack, stack->len - 1);
 }
