@@ -205,6 +205,8 @@ static int open_output_file() {
 
 /// Writes the given loop profiling data information to the output file.
 static void write_loop_prof(void *addr, const loop_data_t *data, int *fd) {
+  // Skip if does not have profiling data.
+  if (!data->has_prof_data) return;
   // Write return address.
   write_assert(*fd, &addr, sizeof(addr));
   // Write profiling data.
