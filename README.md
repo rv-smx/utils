@@ -43,8 +43,8 @@ For the following C program `sort.c`:
 #include <stdio.h>
 #include <stdlib.h>
 
-extern void __loop_profile_func_enter();
-extern void __loop_profile_func_exit();
+extern void *__loop_profile_func_enter();
+extern void __loop_profile_func_exit(void *);
 
 int main() {
   int len;
@@ -52,9 +52,9 @@ int main() {
   int *arr = malloc(len * sizeof(int));
   for (int i = 0; i < len; ++i) scanf("%d", &arr[i]);
 
-  __loop_profile_func_enter();
+  void *outer_loop = __loop_profile_func_enter();
   for (int i = 0; i < len - 1; ++i) {
-    __loop_profile_func_enter();
+    void *inner_loop = __loop_profile_func_enter();
     for (int j = i + 1; j < len; ++j) {
       if (arr[j] < arr[i]) {
         int t = arr[j];
@@ -62,9 +62,9 @@ int main() {
         arr[i] = t;
       }
     }
-    __loop_profile_func_exit();
+    __loop_profile_func_exit(inner_loop);
   }
-  __loop_profile_func_exit();
+  __loop_profile_func_exit(outer_loop);
 
   for (int i = 0; i < len; ++i) printf("%d ", arr[i]);
   printf("\n");
@@ -84,6 +84,23 @@ After running the program, the profile `sort.prof` will be generated, read it by
 ```
 ./prof_reader.py sort sort.prof
 ```
+
+### [compile_loop_prof.py](compile_loop_prof.py)
+
+Compile the given projects/repositories, such as SPEC CPU, by the given compilation configurations, and insert loop profiler into the program.
+
+Example:
+
+```
+mkdir spec06
+./smx_analysis.py /path/to/spec06/src \
+  -c config.spec06.json \
+  -sl /path/to/smx-transforms/src/libSMXTransforms.so \
+  -pl /path/to/libprof.o \
+  -o spec06
+```
+
+Then compiled executables will be generated in `spec06/benchmark_name`.
 
 ## License
 
