@@ -45,6 +45,8 @@ typedef struct {
 typedef struct {
   double read_mpki;
   double write_mpki;
+  double avg_insts;
+  uint64_t num_exec;
 } prof_data_t;
 
 /// Loop data.
@@ -81,12 +83,16 @@ static void fill_prof_data(prof_data_t *data, const perf_data_t *last,
   uint64_t write_misses = cur->values[2] - last->values[2];
   data->read_mpki = read_misses / (num_insts / 1000.0);
   data->write_mpki = write_misses / (num_insts / 1000.0);
+  data->avg_insts = num_insts;
+  data->num_exec = 1;
 }
 
 /// Adds the second profiling data to the first one.
 static void add_prof_data(prof_data_t *lhs, const prof_data_t *rhs) {
   lhs->read_mpki = (lhs->read_mpki + rhs->read_mpki) / 2;
   lhs->write_mpki = (lhs->write_mpki + rhs->write_mpki) / 2;
+  lhs->avg_insts = (lhs->avg_insts + rhs->avg_insts) / 2;
+  lhs->num_exec += rhs->num_exec;
 }
 
 //============================================================
