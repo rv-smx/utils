@@ -7,7 +7,7 @@ import subprocess
 import json
 
 
-RECORD_FMT = '@Pdd'
+RECORD_FMT = '@PdddQ'
 RECORD_LEN = struct.calcsize(RECORD_FMT)
 unpack_record = struct.Struct(RECORD_FMT).unpack_from
 
@@ -21,13 +21,15 @@ Record = Dict[str, Any]
 
 
 def get_record(rel: int, query: LocQuery, data: bytes) -> Record:
-  addr, read_mpki, write_mpki = unpack_record(data)
+  addr, read_mpki, write_mpki, avg_insts, num_exec = unpack_record(data)
   rel_addr = addr - rel
   return {
       'address': hex(rel_addr),
       'location': query(rel_addr),
       'readMpki': read_mpki,
       'writeMpki': write_mpki,
+      'averageInstructions': avg_insts,
+      'numExecutions': num_exec,
   }
 
 
@@ -37,6 +39,8 @@ def print_record(i: int, record: Record) -> None:
   print(f'  Location: {record["location"]}')
   print(f'  Cache Read MPKI: {record["readMpki"]:.4f}')
   print(f'  Cache Write MPKI: {record["writeMpki"]:.4f}')
+  print(f'  Average Instructions: {record["averageInstructions"]:.4f}')
+  print(f'  Number of Executions: {record["numExecutions"]}')
 
 
 if __name__ == '__main__':
