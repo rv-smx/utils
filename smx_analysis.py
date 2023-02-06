@@ -150,24 +150,23 @@ def walk_files(config: CompilationConfig, dir_name: str,
     yield (full_root, files)
 
 
-def analyse(ll: str, smx_lib: str) -> List[Any]:
+def analyse(ll: str, smx_lib: str, passes: str) -> List[Any]:
   '''
   Analyses the given LLVM IR and returns the result.
   '''
-  passes = 'instnamer,loop-simplify,print<stream-memory>'
   pass_flags = f'-load-pass-plugin={smx_lib} -passes="{passes}"'
-  flags = f'{pass_flags} -disable-output -march=rv46gc_xsmx'
+  flags = f'{pass_flags} -disable-output -march=rv64gc_xsmx'
   try:
     out = run_or_fail(f'opt {flags}', stdin=ll, capture_stderr=True)
   except RunCommandError as e:
     temp = log_temp(ll, suffix='.ll')
-    eprint('Error occurred when running SMX analysis!')
+    eprint(f'Error occurred when running passes "{passes}"!')
     eprint(f'The LLVM IR file has already been dumped to "{temp}".')
     raise e
   result = []
   try:
     for line in out.splitlines():
-      result += json.loads(line)
+      result.append(json.loads(line))
   except json.JSONDecodeError as e:
     temp = log_temp(out, suffix='.json')
     eprint('Error occurred when parsing JSON result!')
@@ -176,29 +175,46 @@ def analyse(ll: str, smx_lib: str) -> List[Any]:
   return result
 
 
-def analyse_src(src_file: str, dir: str, config: CompilationConfig, smx_lib: str) -> List[Any]:
+def analyse_src(src_file: str, dir: str, config: CompilationConfig,
+                smx_lib: str) -> Tuple[List[Any], List[Any]]:
   '''
   Analyses the given source file and return the result.
   '''
   ll = config.compile(dir, src_file)
-  return analyse(ll, smx_lib)
+  ll = run_or_fail('opt -S -passes="instnamer,loop-simplify" -march=rv64gc_xsmx',
+                   stdin=ll)
+  smx_result = analyse(ll, smx_lib, 'print<stream-memory>')
+  loop_tree_result = analyse(ll, smx_lib, 'print<loop-trees>')
+  return smx_result, loop_tree_result
 
 
-def analyse_dir(dir_name: str, dir: str, config: CompilationConfig, smx_lib: str) -> List[Any]:
+def analyse_dir(dir_name: str, dir: str, config: CompilationConfig,
+                smx_lib: str) -> Tuple[List[Any], Dict[str, Any]]:
   '''
   Analyses all of the C files in the given directory
   and returns the result.
   '''
+  # collect source files
   src_files = []
   dir = path.abspath(dir)
   for root, files in walk_files(config, dir_name, dir):
     for f in files:
       if config.is_source(dir_name, f):
         src_files.append(path.abspath(path.join(root, f)))
+  # run analysis
   with multiprocessing.Pool(multiprocessing.cpu_count()) as p:
     f = functools.partial(analyse_src, dir=dir, config=config, smx_lib=smx_lib)
     results = p.map(f, src_files)
-  return [item for sublist in results for item in sublist]
+  # process results
+  smx_result = []
+  loop_tree_result = {}
+  for smx, loop_tree in results:
+    for record in smx:
+      smx_result += record
+    for record in loop_tree:
+      for k, v in record.items():
+        loop_tree_result.setdefault(k, []).append(v)
+  return smx_result, loop_tree_result
 
 
 def analyse_root(root: str, out_dir: str, config: CompilationConfig, smx_lib: str) -> None:
@@ -212,14 +228,18 @@ def analyse_root(root: str, out_dir: str, config: CompilationConfig, smx_lib: st
     if path.isdir(dir_path):
       dirs.append((dir, dir_path))
   for i, (dir, dir_path) in enumerate(dirs):
-    out_file = path.join(out_dir, f'{dir}.json')
-    if path.exists(out_file):
+    smx_out_file = path.join(out_dir, f'{dir}.smx.json')
+    loop_tree_out_file = path.join(out_dir, f'{dir}.loops.json')
+    if path.exists(smx_out_file) and path.exists(loop_tree_out_file):
       eprint(f'[{i + 1}/{len(dirs)}] Skipped "{dir}"')
     else:
       eprint(f'[{i + 1}/{len(dirs)}] Analysing "{dir}" ...')
-      result = analyse_dir(dir, dir_path, config, smx_lib)
-      with open(out_file, 'w') as f:
-        json.dump(result, f)
+      smx_result, loop_tree_result = analyse_dir(dir, dir_path,
+                                                 config, smx_lib)
+      with open(smx_out_file, 'w') as f:
+        json.dump(smx_result, f)
+      with open(loop_tree_out_file, 'w') as f:
+        json.dump(loop_tree_result, f)
 
 
 if __name__ == '__main__':
