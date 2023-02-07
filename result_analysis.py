@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Dict, Any, List, TextIO, Optional, Tuple
+from typing import Dict, Any, List, IO, Optional, Tuple
 import json
 import os
 from dataclasses import dataclass
@@ -357,7 +357,7 @@ class AnalysisResult:
     object.__setattr__(self, 'num_indirect_stream_stores',
                        num_indirect_stream_stores)
 
-  def print(self, file: Optional[TextIO] = None, indent_width: int = 0) -> None:
+  def print(self, file: Optional[IO] = None, indent_width: int = 0) -> None:
     '''
     Prints the analysis result.
     '''
@@ -413,7 +413,7 @@ class AnalysisResult:
           f'({self.num_indirect_stream_stores / self.num_stream_stores * 100:.2f}%)')
 
 
-def dump_csv(f: TextIO, results: Dict[str, AnalysisResult]) -> None:
+def dump_csv(f: IO, results: Dict[str, AnalysisResult]) -> None:
   '''
   Dumps the given results to CSV file.
   '''
