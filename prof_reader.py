@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Callable, Dict, Any
+from typing import Callable, Dict, Any, Tuple
 import struct
 import sys
 import subprocess
@@ -16,16 +16,18 @@ RELOCATION_LEN = struct.calcsize(RELOCATION_FMT)
 unpack_relocation = struct.Struct(RELOCATION_FMT).unpack_from
 
 
-LocQuery = Callable[[int], str]
+LocQuery = Callable[[int], Tuple[str, str]]
 Record = Dict[str, Any]
 
 
 def get_record(rel: int, query: LocQuery, data: bytes) -> Record:
   addr, read_mpki, write_mpki, avg_insts, num_exec = unpack_record(data)
   rel_addr = addr - rel
+  func, loc = query(rel_addr)
   return {
       'address': hex(rel_addr),
-      'location': query(rel_addr),
+      'location': loc,
+      'function': func,
       'readMpki': read_mpki,
       'writeMpki': write_mpki,
       'averageInstructions': avg_insts,
@@ -37,6 +39,7 @@ def print_record(i: int, record: Record) -> None:
   print(f'Loop #{i}:')
   print(f'  Address: {record["address"]}')
   print(f'  Location: {record["location"]}')
+  print(f'  Function: {record["function"]}')
   print(f'  Cache Read MPKI: {record["readMpki"]:.4f}')
   print(f'  Cache Write MPKI: {record["writeMpki"]:.4f}')
   print(f'  Average Instructions: {record["averageInstructions"]:.4f}')
@@ -51,13 +54,24 @@ if __name__ == '__main__':
   parser.add_argument('profile', type=str, help='loop profile')
   parser.add_argument('-j', '--json', default=False, action='store_true',
                       help='dump JSON')
+  parser.add_argument('-a2l', '--addr2line', type=str, default=None,
+                      help='specify the path to `addr2line` executable')
   args = parser.parse_args()
 
   # define the location query function
-  def query(addr: int) -> str:
-    ret = subprocess.run(['addr2line', '-e', args.binary, hex(addr - 1)],
+  if args.addr2line is None:
+    addr2line = 'addr2line'
+  else:
+    addr2line = args.addr2line
+
+  def query(addr: int) -> Tuple[str, str]:
+    ret = subprocess.run([addr2line, '-e', args.binary,
+                          '-f', '-s', hex(addr - 1)],
                          capture_output=True, text=True)
-    return 'Unknown' if ret.returncode else ret.stdout.strip()
+    if ret.returncode:
+      return '<Unknown>', '<Unknow>'
+    func, loc = ret.stdout.splitlines()
+    return func.strip(), loc.strip()
 
   # read the profile data
   records = []
