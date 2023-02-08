@@ -12,6 +12,10 @@ class StreamInfo:
   '''
 
   def __init__(self, info: Dict[str, Any]) -> None:
+    # update supported induction variable streams first
+    self.__num_ivs = len(info['inductionVariableStreams'])
+    self.__supported_ivs = set()
+    self.__update_supported_ivs(info)
     # check memory streams
     self.__num_mss = len(info['memStreams'])
     self.__supported_mss = set()
@@ -19,10 +23,8 @@ class StreamInfo:
     self.__max_num_iv_factors = 0
     self.__max_num_ms_factors = 0
     self.__max_stride = 0
-    self.__supported_ivs = set()
     self.__check_mss(info)
     # check induction variable streams
-    self.__num_ivs = len(info['inductionVariableStreams'])
     self.__max_iv_chain_len = 0
     self.__check_ivs(info)
     # check memory operations
@@ -34,13 +36,26 @@ class StreamInfo:
     self.__num_indirect_stream_stores = 0
     self.__check_mem_ops(info)
 
+  def __update_supported_ivs(self, info: Dict[str, Any]) -> None:
+    for iv in info['inductionVariableStreams']:
+      if iv['directionKnown']:
+        self.__supported_ivs.add(iv['name'])
+
   def __check_mss(self, info: Dict[str, Any]) -> None:
     mss = {}
     for ms in info['memStreams']:
       if ms['read'] or ms['written']:
         mss[ms['name']] = ms
+    # use `list(mss.values())` because `__check_ms` may delete value from `mss`
     for ms in list(mss.values()):
-      self.__check_ms(mss, ms)
+      # check the current memory stream
+      if not self.__check_ms(mss, ms):
+        # mark all referenced induction variable streams as unsupported
+        for factor in ms['factors']:
+          dep = factor['depStream']
+          if factor['depStreamKind'] == 'inductionVariable' \
+                  and dep in self.__supported_ivs:
+            self.__supported_ivs.remove(dep)
 
   def __check_ms(self, mss: Dict[str, Dict[str, Any]], ms: Dict[str, Any]) -> bool:
     '''
@@ -61,8 +76,13 @@ class StreamInfo:
         # using a non-stream loop variant
         del mss[name]
         return False
-      if factor['depStreamKind'] == 'memory':
-        dep = factor['depStream']
+      dep = factor['depStream']
+      if factor['depStreamKind'] == 'inductionVariable':
+        if dep not in self.__supported_ivs:
+          # referencing an unsupported induction variable stream
+          del mss[name]
+          return False
+      elif factor['depStreamKind'] == 'memory':
         if dep not in mss or not self.__check_ms(mss, mss[dep]):
           # referencing an unsupported memory stream
           del mss[name]
@@ -77,7 +97,6 @@ class StreamInfo:
     for factor in ms['factors']:
       if factor['depStreamKind'] == 'inductionVariable':
         num_iv_factors += 1
-        self.__supported_ivs.add(factor['depStream'])
       elif factor['depStreamKind'] == 'memory':
         num_ms_factors += 1
       self.__max_stride = max(self.__max_stride, factor['stride'])
@@ -92,9 +111,6 @@ class StreamInfo:
       name, parent = iv['name'], iv['parent']
       iv_parent[name] = parent
       if name not in self.__supported_ivs:
-        continue
-      if not iv['increasing']:
-        self.__supported_ivs.remove(name)
         continue
       # update induction variable chain info
       if parent is not None and parent not in self.__supported_ivs:
@@ -225,6 +241,20 @@ class StreamInfo:
     Returns the number of indirect memory stream store operations.
     '''
     return self.__num_indirect_stream_stores
+
+  def is_supported_iv(self, name: str) -> bool:
+    '''
+    Returns `True` if the given name corresponding to a supported
+    induction variable stream.
+    '''
+    return name in self.__supported_ivs
+
+  def is_indirect_supported_ms(self, name: str) -> bool:
+    '''
+    Returns `True` if the given name corresponding to a supported
+    indirect memory stream.
+    '''
+    return name in self.__indirect_supported_mss
 
 
 @dataclass(frozen=True)
@@ -478,11 +508,11 @@ if __name__ == '__main__':
   results = {}
   for d in sorted(os.listdir(args.dir)):
     path = os.path.join(args.dir, d)
-    (name, ext) = os.path.splitext(d)
-    if ext == '.json' and os.path.isfile(path):
+    if d.endswith('.smx.json') and os.path.isfile(path):
       with open(path) as f:
         streams = list(map(StreamInfo, json.load(f)))
       result = AnalysisResult(streams)
+      name = '.'.join(d.split('.')[:-2])
       if args.print:
         print(name, file=file)
         result.print(file=file, indent_width=2)
