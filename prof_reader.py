@@ -48,8 +48,7 @@ def print_record(i: int, record: Record) -> None:
 
 if __name__ == '__main__':
   import argparse
-  parser = argparse.ArgumentParser(
-      description='Loop profile reader.')
+  parser = argparse.ArgumentParser(description='Loop profile reader.')
   parser.add_argument('binary', type=str, help='binary file with debug info')
   parser.add_argument('profile', type=str, help='loop profile')
   parser.add_argument('-j', '--json', default=False, action='store_true',
