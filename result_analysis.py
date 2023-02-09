@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Dict, Any, List, IO, Optional, Tuple
+from typing import Dict, Any, List, IO, Optional, Tuple, Set
 import json
 import os
 from dataclasses import dataclass
@@ -12,10 +12,6 @@ class StreamInfo:
   '''
 
   def __init__(self, info: Dict[str, Any]) -> None:
-    # update supported induction variable streams first
-    self.__num_ivs = len(info['inductionVariableStreams'])
-    self.__supported_ivs = set()
-    self.__update_supported_ivs(info)
     # check memory streams
     self.__num_mss = len(info['memStreams'])
     self.__supported_mss = set()
@@ -23,8 +19,10 @@ class StreamInfo:
     self.__max_num_iv_factors = 0
     self.__max_num_ms_factors = 0
     self.__max_stride = 0
+    self.__supported_ivs = set()
     self.__check_mss(info)
     # check induction variable streams
+    self.__num_ivs = len(info['inductionVariableStreams'])
     self.__max_iv_chain_len = 0
     self.__check_ivs(info)
     # check memory operations
@@ -36,28 +34,23 @@ class StreamInfo:
     self.__num_indirect_stream_stores = 0
     self.__check_mem_ops(info)
 
-  def __update_supported_ivs(self, info: Dict[str, Any]) -> None:
+  def __check_mss(self, info: Dict[str, Any]) -> None:
+    # select all supported induction variable streams
+    ivs = set()
     for iv in info['inductionVariableStreams']:
       if iv['directionKnown']:
-        self.__supported_ivs.add(iv['name'])
-
-  def __check_mss(self, info: Dict[str, Any]) -> None:
+        ivs.add(iv['name'])
+    # select all supported memory streams
     mss = {}
     for ms in info['memStreams']:
       if ms['read'] or ms['written']:
         mss[ms['name']] = ms
     # use `list(mss.values())` because `__check_ms` may delete value from `mss`
     for ms in list(mss.values()):
-      # check the current memory stream
-      if not self.__check_ms(mss, ms):
-        # mark all referenced induction variable streams as unsupported
-        for factor in ms['factors']:
-          dep = factor['depStream']
-          if factor['depStreamKind'] == 'inductionVariable' \
-                  and dep in self.__supported_ivs:
-            self.__supported_ivs.remove(dep)
+      self.__check_ms(ivs, mss, ms)
 
-  def __check_ms(self, mss: Dict[str, Dict[str, Any]], ms: Dict[str, Any]) -> bool:
+  def __check_ms(self, ivs: Set[str], mss: Dict[str, Dict[str, Any]],
+                 ms: Dict[str, Any]) -> bool:
     '''
     Checks the given memory stream.
 
@@ -77,13 +70,12 @@ class StreamInfo:
         del mss[name]
         return False
       dep = factor['depStream']
-      if factor['depStreamKind'] == 'inductionVariable':
-        if dep not in self.__supported_ivs:
-          # referencing an unsupported induction variable stream
-          del mss[name]
-          return False
-      elif factor['depStreamKind'] == 'memory':
-        if dep not in mss or not self.__check_ms(mss, mss[dep]):
+      if factor['depStreamKind'] == 'inductionVariable' and dep not in ivs:
+        # referencing an unsupported induction variable stream
+        del mss[name]
+        return False
+      if factor['depStreamKind'] == 'memory':
+        if dep not in mss or not self.__check_ms(ivs, mss, mss[dep]):
           # referencing an unsupported memory stream
           del mss[name]
           return False
@@ -97,6 +89,7 @@ class StreamInfo:
     for factor in ms['factors']:
       if factor['depStreamKind'] == 'inductionVariable':
         num_iv_factors += 1
+        self.__supported_ivs.add(factor['depStream'])
       elif factor['depStreamKind'] == 'memory':
         num_ms_factors += 1
       self.__max_stride = max(self.__max_stride, factor['stride'])
