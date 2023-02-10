@@ -53,24 +53,26 @@ if __name__ == '__main__':
   parser.add_argument('profile', type=str, help='loop profile')
   parser.add_argument('-j', '--json', default=False, action='store_true',
                       help='dump JSON')
-  parser.add_argument('-a2l', '--addr2line', type=str, default=None,
-                      help='specify the path to `addr2line` executable')
+  parser.add_argument('-s', '--symbolizer', type=str, default=None,
+                      help='specify the path to `llvm-symbolizer` executable')
   args = parser.parse_args()
 
   # define the location query function
-  if args.addr2line is None:
-    addr2line = 'addr2line'
+  if args.symbolizer is None:
+    symbolizer = 'llvm-symbolizer'
   else:
-    addr2line = args.addr2line
+    symbolizer = args.symbolizer
 
   def query(addr: int) -> Tuple[str, str]:
-    ret = subprocess.run([addr2line, '-e', args.binary,
-                          '-f', '-s', hex(addr - 1)],
+    ret = subprocess.run([symbolizer, '-e', args.binary, '-f', '-s',
+                          '--no-demangle', '--output-style=JSON', hex(addr - 1)],
                          capture_output=True, text=True)
     if ret.returncode:
-      return '<Unknown>', '<Unknow>'
-    func, loc = ret.stdout.splitlines()
-    return func.strip(), loc.strip()
+      return '<Unknown>', '<Unknown>'
+    sym = json.loads(ret.stdout)[0]['Symbol'][0]
+    func = sym['FunctionName']
+    loc = f'{sym["FileName"]}:{sym["Line"]}:{sym["Column"]}'
+    return func, loc
 
   # read the profile data
   records = []
