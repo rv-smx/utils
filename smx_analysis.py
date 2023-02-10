@@ -213,8 +213,8 @@ def analyse_dir(dir_name: str, dir: str, config: CompilationConfig,
       smx_result += record
     for record in loop_tree:
       for k, v in record.items():
-        loop_tree_result.setdefault(k, []).append(v)
-  return smx_result, loop_tree_result
+        loop_tree_result.setdefault(k, set()).update(v)
+  return smx_result, {k: list(v) for k, v in loop_tree_result.items()}
 
 
 def analyse_root(root: str, out_dir: str, config: CompilationConfig, smx_lib: str) -> None:
