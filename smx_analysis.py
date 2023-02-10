@@ -181,7 +181,7 @@ def analyse_src(src_file: str, dir: str, config: CompilationConfig,
   Analyses the given source file and return the result.
   '''
   ll = config.compile(dir, src_file)
-  ll = run_or_fail('opt -S -passes="instnamer,loop-simplify" -march=rv64gc_xsmx',
+  ll = run_or_fail('opt -S -passes="loop-simplify,instnamer" -march=rv64gc_xsmx',
                    stdin=ll)
   smx_result = analyse(ll, smx_lib, 'print<stream-memory>')
   loop_tree_result = analyse(ll, smx_lib, 'print<loop-trees>')
