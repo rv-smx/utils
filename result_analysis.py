@@ -38,7 +38,8 @@ class StreamInfo:
     # select all supported induction variable streams
     ivs = set()
     for iv in info['inductionVariableStreams']:
-      if iv['directionKnown']:
+      final = iv['finalVal']
+      if final is not None and final['invariant']:
         ivs.add(iv['name'])
     # select all supported memory streams
     mss = {}
