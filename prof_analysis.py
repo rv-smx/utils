@@ -7,7 +7,7 @@ import sys
 import json
 
 
-LoopTree = Dict[str, List[Dict[str, Any]]]
+LoopTree = Dict[str, List[Optional[str]]]
 SmxResult = Dict[str, Any]
 SmxDict = Dict[str, Dict[str, SmxResult]]
 ProfRecord = Dict[str, Any]
@@ -19,12 +19,7 @@ def get_loop_id(debug_loc: str) -> str:
   '''
   path = debug_loc.split('@[')[0].strip()
   id = os.path.basename(path)
-  ids = id.split(':')
-  if len(ids) == 2 and ids[-1].isnumeric():
-    return id
-  elif len(ids) > 2 and ids[-1].isnumeric() and ids[-2].isnumeric():
-    return ':'.join(ids[:-1])
-  raise RuntimeError('invalid debug location info')
+  return id
 
 
 def build_loop_tree(loops_file: str) -> LoopTree:
@@ -36,13 +31,7 @@ def build_loop_tree(loops_file: str) -> LoopTree:
   tree: LoopTree = {}
   for loc, records in data.items():
     id = get_loop_id(loc)
-    new_records = []
-    for prof in records:
-      if prof['parent'] is not None:
-        prof['parent'] = get_loop_id(prof['parent'])
-      prof['children'] = list(map(get_loop_id, prof['children']))
-      new_records.append(prof)
-    tree[id] = new_records
+    tree[id] = [None if i is None else get_loop_id(i) for i in records]
   return tree
 
 
@@ -54,11 +43,11 @@ def build_smx_dict(smx_file: str) -> SmxDict:
   with open(smx_file, 'r') as f:
     data: List[SmxResult] = json.load(f)
   smx_dict: SmxDict = {}
-  for prof in data:
-    loop_info = prof['loop']
+  for result in data:
+    loop_info = result['loop']
     id = get_loop_id(loop_info['startLoc'])
     func = loop_info['parentFunc']
-    smx_dict.setdefault(id, {})[func] = prof
+    smx_dict.setdefault(id, {})[func] = result
   return smx_dict
 
 
@@ -69,8 +58,8 @@ class ProfResult:
 
   def __init__(self, prof: ProfRecord, smx: Optional[SmxResult]) -> None:
     self.__prof = prof
-    self.__streamizable = False
-    self.__has_indirect_access = False
+    self.__streamizable = None
+    self.__has_indirect_access = None
     if smx is not None:
       self.__updated_stream_info(smx)
 
@@ -86,6 +75,7 @@ class ProfResult:
     # check if the induction variable stream is supported
     info = StreamInfo(smx)
     self.__streamizable = info.is_supported_iv(iv_name)
+    self.__has_indirect_access = False
     if not self.__streamizable:
       return
     # check if there are indirect stream accesses in the loop
@@ -107,6 +97,15 @@ class ProfResult:
           'Cache Write MPKI', 'Average Instructions', 'Number of Executions',
           'Streamizable', 'Has Indirect Stream Access', sep=',', file=f)
 
+  @staticmethod
+  def __tri_state_to_str(tri: Optional[bool]) -> str:
+    '''
+    Returns a string that can represents the given tri-state value.
+    '''
+    if tri is None:
+      return 'undetermined'
+    return 'yes' if tri else 'no'
+
   def dump_csv_line(self, f: IO) -> None:
     '''
     Dumps CSV line of the current result to the given file.
@@ -114,7 +113,8 @@ class ProfResult:
     p = self.__prof
     print(p['address'], p['location'], p['function'], p['readMpki'],
           p['writeMpki'], p['averageInstructions'], p['numExecutions'],
-          self.__streamizable, self.__has_indirect_access, sep=',', file=f)
+          self.__tri_state_to_str(self.__streamizable),
+          self.__tri_state_to_str(self.__has_indirect_access), sep=',', file=f)
 
 
 def get_top_level_loop(id: str, loops: LoopTree) -> Optional[str]:
@@ -123,13 +123,13 @@ def get_top_level_loop(id: str, loops: LoopTree) -> Optional[str]:
 
   Returns `None` if the top level loop can not be determined.
   '''
-  records = loops.get(id)
-  if records is None or len(records) != 1:
+  parents = loops.get(id)
+  if parents is None or len(parents) != 1:
     return None
-  loop = records[0]
-  if loop['parent'] is None:
+  parent = parents[0]
+  if parent is None:
     return id
-  return get_top_level_loop(loop['parent'], loops)
+  return get_top_level_loop(parent, loops)
 
 
 def get_smx_result_of_loop(id: str, func: str, loops: LoopTree,
