@@ -82,7 +82,7 @@ class ProfResult:
     for ms in smx['memStreams']:
       name = ms['name']
       for factor in ms['factors']:
-        if factor['depStreamKind'] == 'inductionVariable' \
+        if factor['depStreamKind'] in ('inductionVariable', 'inductionVariableSum') \
                 and factor['depStream'] == iv_name \
                 and info.is_indirect_supported_ms(name):
           self.__has_indirect_access = True
