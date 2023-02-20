@@ -66,20 +66,10 @@ class StreamInfo:
     # check all factors
     is_indirect = False
     for factor in ms['factors']:
-      if factor['depStreamKind'] == 'notAStream' and not factor['invariant']:
-        # using a non-stream loop variant
-        del mss[name]
+      ret, ind = self.__check_addr_factor(ivs, mss, name, factor)
+      if not ret:
         return False
-      dep = factor['depStream']
-      if factor['depStreamKind'] == 'inductionVariable' and dep not in ivs:
-        # referencing an unsupported induction variable stream
-        del mss[name]
-        return False
-      if factor['depStreamKind'] == 'memory':
-        if dep not in mss or not self.__check_ms(ivs, mss, mss[dep]):
-          # referencing an unsupported memory stream
-          del mss[name]
-          return False
+      if ind:
         is_indirect = True
     # update result
     self.__supported_mss.add(name)
@@ -88,15 +78,55 @@ class StreamInfo:
     num_iv_factors = 0
     num_ms_factors = 0
     for factor in ms['factors']:
-      if factor['depStreamKind'] == 'inductionVariable':
+      kind = factor['depStreamKind']
+      if kind in ('inductionVariable', 'inductionVariableSum'):
         num_iv_factors += 1
         self.__supported_ivs.add(factor['depStream'])
-      elif factor['depStreamKind'] == 'memory':
+      elif kind in ('memory', 'memorySum'):
         num_ms_factors += 1
       self.__max_stride = max(self.__max_stride, factor['stride'])
     self.__max_num_iv_factors = max(self.__max_num_iv_factors, num_iv_factors)
     self.__max_num_ms_factors = max(self.__max_num_ms_factors, num_ms_factors)
     return True
+
+  def __check_addr_factor(self, ivs: Set[str], mss: Dict[str, Dict[str, Any]],
+                          name: str, factor: Dict[str, Any]) -> Tuple[bool, bool]:
+    '''
+    Checks the given address factor.
+    
+    Returns a tuple of the check result and whether the factor
+    references a memory stream.
+    '''
+    def fail() -> Tuple[bool, bool]:
+      del mss[name]
+      return False, False
+
+    invariant = factor['invariant']
+    dep = factor['depStream']
+    if factor['depStreamKind'] == 'notAStream':
+      if not invariant:
+        # using a non-stream loop variant
+        return fail()
+    elif factor['depStreamKind'] == 'inductionVariable':
+      if dep not in ivs:
+        # referencing an unsupported induction variable stream
+        return fail()
+    elif factor['depStreamKind'] == 'inductionVariableSum':
+      if not invariant or dep not in ivs:
+        # referencing an unsupported induction variable stream
+        return fail()
+    elif factor['depStreamKind'] == 'memory':
+      if dep not in mss or not self.__check_ms(ivs, mss, mss[dep]):
+        # referencing an unsupported memory stream
+        return fail()
+      return True, True
+    elif factor['depStreamKind'] == 'memorySum':
+      if not invariant or dep not in mss \
+              or not self.__check_ms(ivs, mss, mss[dep]):
+        # referencing an unsupported memory stream
+        return fail()
+      return True, True
+    return True, False
 
   def __check_ivs(self, info: Dict[str, Any]) -> None:
     iv_parent = {}
