@@ -19,6 +19,7 @@ class StreamInfo:
     self.__max_num_iv_factors = 0
     self.__max_num_ms_factors = 0
     self.__max_stride = 0
+    self.__max_width = 0
     self.__supported_ivs = set()
     self.__check_mss(info)
     # check induction variable streams
@@ -87,6 +88,7 @@ class StreamInfo:
       self.__max_stride = max(self.__max_stride, factor['stride'])
     self.__max_num_iv_factors = max(self.__max_num_iv_factors, num_iv_factors)
     self.__max_num_ms_factors = max(self.__max_num_ms_factors, num_ms_factors)
+    self.__max_width = max(self.__max_width, ms['width'])
     return True
 
   def __check_addr_factor(self, ivs: Set[str], mss: Dict[str, Dict[str, Any]],
@@ -225,6 +227,13 @@ class StreamInfo:
     return self.__max_stride
 
   @property
+  def max_width(self) -> int:
+    '''
+    Returns the maximum width (in bytes) of memory streams.
+    '''
+    return self.__max_width
+
+  @property
   def num_loads(self) -> int:
     '''
     Returns the number of load operations.
@@ -291,6 +300,7 @@ class AnalysisResult:
   num_partially_streamizable: int
   num_fully_streamizable: int
   max_stride: int
+  max_width: int
   num_supported_mss: int
   num_indirect_supported_mss: int
   num_loads: int
@@ -320,6 +330,7 @@ class AnalysisResult:
     num_iv_factor_freq_dist = {}
     num_ms_factor_freq_dist = {}
     max_stride = 0
+    max_width = 0
     num_supported_mss = 0
     num_indirect_supported_mss = 0
     num_loads = 0
@@ -346,8 +357,10 @@ class AnalysisResult:
       num_iv_factor_freq_dist[stream.max_num_iv_factors] = prev + 1
       prev = num_ms_factor_freq_dist.setdefault(stream.max_num_ms_factors, 0)
       num_ms_factor_freq_dist[stream.max_num_ms_factors] = prev + 1
-      # stride of address factor
+      # stride of address factors
       max_stride = max(max_stride, stream.max_stride)
+      # width of memory streams
+      max_width = max(max_width, stream.max_width)
       # indirect memory streams percentage
       num_supported_mss += stream.num_supported_mss
       num_indirect_supported_mss += stream.num_indirect_supported_mss
@@ -399,6 +412,7 @@ class AnalysisResult:
       object.__setattr__(self, 'most_freq_ms_factors',
                          max(num_ms_factor_freq_dist.items(), key=lambda x: x[1]))
     object.__setattr__(self, 'max_stride', max_stride)
+    object.__setattr__(self, 'max_width', max_width)
     object.__setattr__(self, 'num_supported_mss', num_supported_mss)
     object.__setattr__(self, 'num_indirect_supported_mss',
                        num_indirect_supported_mss)
@@ -447,6 +461,7 @@ class AnalysisResult:
     p(f'{indent}most freq memory stream factors (num, freq):',
       self.most_freq_ms_factors)
     p(f'{indent}max stride: {self.max_stride}')
+    p(f'{indent}max width: {self.max_width}')
     p(f'{indent}supported memory streams: {self.num_supported_mss}')
     if self.num_supported_mss:
       p(f'{indent}indirect memory streams:', self.num_indirect_supported_mss,
@@ -487,7 +502,7 @@ def dump_csv(f: IO, results: Dict[str, AnalysisResult]) -> None:
         'most freq induction variable stream factors freq',
         'max memory stream factors', 'max memory stream factors freq',
         'most freq memory stream factors',
-        'most freq memory stream factors freq', 'max stride',
+        'most freq memory stream factors freq', 'max stride', 'max width',
         'supported memory streams', 'indirect memory streams', 'total loads',
         'stream loads', 'indirect stream loads', 'total stores', 'stream stores',
         'indirect stream stores', sep=',', file=f)
@@ -505,7 +520,7 @@ def dump_csv(f: IO, results: Dict[str, AnalysisResult]) -> None:
           result.most_freq_iv_factors[0], result.most_freq_iv_factors[1],
           result.max_ms_factors_num_freq[0], result.max_ms_factors_num_freq[1],
           result.most_freq_ms_factors[0], result.most_freq_ms_factors[1],
-          result.max_stride, result.num_supported_mss,
+          result.max_stride, result.max_width, result.num_supported_mss,
           result.num_indirect_supported_mss, result.num_loads,
           result.num_stream_loads, result.num_indirect_stream_loads,
           result.num_stores, result.num_stream_stores,
