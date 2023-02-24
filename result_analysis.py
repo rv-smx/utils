@@ -18,7 +18,6 @@ class StreamInfo:
     self.__indirect_supported_mss = set()
     self.__max_num_iv_factors = 0
     self.__max_num_ms_factors = 0
-    self.__max_stride = 0
     self.__max_width = 0
     self.__supported_ivs = set()
     self.__check_mss(info)
@@ -80,12 +79,11 @@ class StreamInfo:
     num_ms_factors = 0
     for factor in ms['factors']:
       kind = factor['depStreamKind']
-      if kind in ('inductionVariable', 'inductionVariableSum'):
+      if kind == 'inductionVariable':
         num_iv_factors += 1
         self.__supported_ivs.add(factor['depStream'])
-      elif kind in ('memory', 'memorySum'):
+      elif kind == 'memory':
         num_ms_factors += 1
-      self.__max_stride = max(self.__max_stride, factor['stride'])
     self.__max_num_iv_factors = max(self.__max_num_iv_factors, num_iv_factors)
     self.__max_num_ms_factors = max(self.__max_num_ms_factors, num_ms_factors)
     self.__max_width = max(self.__max_width, ms['width'])
@@ -105,29 +103,29 @@ class StreamInfo:
 
     invariant = factor['invariant']
     dep = factor['depStream']
-    if factor['depStreamKind'] == 'notAStream':
+    kind = factor['depStreamKind']
+    # check dependent stream
+    if kind == 'notAStream':
       if not invariant:
         # using a non-stream loop variant
         return fail()
-    elif factor['depStreamKind'] == 'inductionVariable':
+    elif kind == 'inductionVariable':
       if dep not in ivs:
         # referencing an unsupported induction variable stream
         return fail()
-    elif factor['depStreamKind'] == 'inductionVariableSum':
-      if not invariant or dep not in ivs:
-        # referencing an unsupported induction variable stream
-        return fail()
-    elif factor['depStreamKind'] == 'memory':
+    elif kind == 'memory':
       if dep not in mss or not self.__check_ms(ivs, mss, mss[dep]):
         # referencing an unsupported memory stream
         return fail()
       return True, True
-    elif factor['depStreamKind'] == 'memorySum':
-      if not invariant or dep not in mss \
-              or not self.__check_ms(ivs, mss, mss[dep]):
-        # referencing an unsupported memory stream
+    # check strides
+    for stride in factor['strides']:
+      # using a loop variant as stride
+      if not stride['invariant']:
         return fail()
-      return True, True
+      # div can only be applied on constant value, otherwise may lost accuracy
+      if stride['op'].endswith('div') and kind != 'notAStream':
+        return fail()
     return True, False
 
   def __check_ivs(self, info: Dict[str, Any]) -> None:
@@ -220,13 +218,6 @@ class StreamInfo:
     return self.__max_num_ms_factors
 
   @property
-  def max_stride(self) -> int:
-    '''
-    Returns the maximum stride of address factor.
-    '''
-    return self.__max_stride
-
-  @property
   def max_width(self) -> int:
     '''
     Returns the maximum width (in bytes) of memory streams.
@@ -299,7 +290,6 @@ class AnalysisResult:
   num_loops: int
   num_partially_streamizable: int
   num_fully_streamizable: int
-  max_stride: int
   max_width: int
   num_supported_mss: int
   num_indirect_supported_mss: int
@@ -329,7 +319,6 @@ class AnalysisResult:
     num_mss_freq_dist = {}
     num_iv_factor_freq_dist = {}
     num_ms_factor_freq_dist = {}
-    max_stride = 0
     max_width = 0
     num_supported_mss = 0
     num_indirect_supported_mss = 0
@@ -357,8 +346,6 @@ class AnalysisResult:
       num_iv_factor_freq_dist[stream.max_num_iv_factors] = prev + 1
       prev = num_ms_factor_freq_dist.setdefault(stream.max_num_ms_factors, 0)
       num_ms_factor_freq_dist[stream.max_num_ms_factors] = prev + 1
-      # stride of address factors
-      max_stride = max(max_stride, stream.max_stride)
       # width of memory streams
       max_width = max(max_width, stream.max_width)
       # indirect memory streams percentage
@@ -411,7 +398,6 @@ class AnalysisResult:
     if len(num_ms_factor_freq_dist):
       object.__setattr__(self, 'most_freq_ms_factors',
                          max(num_ms_factor_freq_dist.items(), key=lambda x: x[1]))
-    object.__setattr__(self, 'max_stride', max_stride)
     object.__setattr__(self, 'max_width', max_width)
     object.__setattr__(self, 'num_supported_mss', num_supported_mss)
     object.__setattr__(self, 'num_indirect_supported_mss',
@@ -460,7 +446,6 @@ class AnalysisResult:
       self.max_ms_factors_num_freq)
     p(f'{indent}most freq memory stream factors (num, freq):',
       self.most_freq_ms_factors)
-    p(f'{indent}max stride: {self.max_stride}')
     p(f'{indent}max width: {self.max_width}')
     p(f'{indent}supported memory streams: {self.num_supported_mss}')
     if self.num_supported_mss:
@@ -502,7 +487,7 @@ def dump_csv(f: IO, results: Dict[str, AnalysisResult]) -> None:
         'most freq induction variable stream factors freq',
         'max memory stream factors', 'max memory stream factors freq',
         'most freq memory stream factors',
-        'most freq memory stream factors freq', 'max stride', 'max width',
+        'most freq memory stream factors freq', 'max width',
         'supported memory streams', 'indirect memory streams', 'total loads',
         'stream loads', 'indirect stream loads', 'total stores', 'stream stores',
         'indirect stream stores', sep=',', file=f)
@@ -520,7 +505,7 @@ def dump_csv(f: IO, results: Dict[str, AnalysisResult]) -> None:
           result.most_freq_iv_factors[0], result.most_freq_iv_factors[1],
           result.max_ms_factors_num_freq[0], result.max_ms_factors_num_freq[1],
           result.most_freq_ms_factors[0], result.most_freq_ms_factors[1],
-          result.max_stride, result.max_width, result.num_supported_mss,
+          result.max_width, result.num_supported_mss,
           result.num_indirect_supported_mss, result.num_loads,
           result.num_stream_loads, result.num_indirect_stream_loads,
           result.num_stores, result.num_stream_stores,
