@@ -10,7 +10,7 @@ import functools
 
 
 def compile_src(src_file: str, dir: str, config: CompilationConfig,
-                smx_lib: str, pic: bool) -> Optional[str]:
+                profiler: str, pic: bool) -> Optional[str]:
   '''
   Compiles the given source file.
   
@@ -20,7 +20,7 @@ def compile_src(src_file: str, dir: str, config: CompilationConfig,
   # compile to LLVM IR
   ll = config.compile(dir, src_file)
   # insert profiling functions
-  loop_profiler_flags = f'-load-pass-plugin={smx_lib} -passes=loop-profiler'
+  loop_profiler_flags = f'-load-pass-plugin={profiler} -passes=loop-profiler'
   ll_simplified = run_or_fail(f'opt -S -loop-simplify', stdin=ll)
   try:
     ll_prof = run_or_fail(f'opt -S {loop_profiler_flags}', stdin=ll_simplified)
@@ -37,7 +37,7 @@ def compile_src(src_file: str, dir: str, config: CompilationConfig,
 
 
 def compile_dir(dir_name: str, dir: str, exe_file: str, config: CompilationConfig,
-                smx_lib: str, libprof: str, pic: bool) -> None:
+                profiler: str, libprof: str, pic: bool) -> None:
   '''
   Compiles all source files in the given directory
   and save the compiled executable to the given file.
@@ -54,7 +54,7 @@ def compile_dir(dir_name: str, dir: str, exe_file: str, config: CompilationConfi
   # compile to object files
   with multiprocessing.Pool() as p:
     f = functools.partial(compile_src, dir=dir,
-                          config=config, smx_lib=smx_lib, pic=pic)
+                          config=config, profiler=profiler, pic=pic)
     objs = []
     for obj in p.map(f, src_files):
       if obj is None:
@@ -68,7 +68,7 @@ def compile_dir(dir_name: str, dir: str, exe_file: str, config: CompilationConfi
 
 
 def compile_root(root: str, out_dir: str, config: CompilationConfig,
-                 smx_lib: str, libprof: str, pic: bool) -> None:
+                 profiler: str, libprof: str, pic: bool) -> None:
   '''
   Compiles the given root directory
   and save the compiled executable to the output directory.
@@ -84,7 +84,7 @@ def compile_root(root: str, out_dir: str, config: CompilationConfig,
       eprint(f'[{i + 1}/{len(dirs)}] Skipped "{dir}"')
     else:
       eprint(f'[{i + 1}/{len(dirs)}] Compiling "{dir}" ...')
-      compile_dir(dir, dir_path, exe_file, config, smx_lib, libprof, pic)
+      compile_dir(dir, dir_path, exe_file, config, profiler, libprof, pic)
 
 
 if __name__ == '__main__':
@@ -94,8 +94,8 @@ if __name__ == '__main__':
   parser.add_argument('root', type=str, help='project root directory')
   parser.add_argument('-c', '--config', type=str, required=True,
                       help='compilation configuration')
-  parser.add_argument('-sl', '--smx-lib', type=str, required=True,
-                      help='SMX transforms library')
+  parser.add_argument('-p', '--profiler', type=str, required=True,
+                      help='loop profiler library')
   parser.add_argument('-pl', '--libprof', type=str, required=True,
                       help='profiling library')
   parser.add_argument('-pic', default=False, action='store_true',
@@ -117,7 +117,7 @@ if __name__ == '__main__':
 
   if args.dir is None:
     compile_root(args.root, out_dir, config,
-                 args.smx_lib, args.libprof, args.pic)
+                 args.profiler, args.libprof, args.pic)
   else:
     dir_path = os.path.join(args.root, args.dir)
     if not os.path.isdir(dir_path):
@@ -126,4 +126,4 @@ if __name__ == '__main__':
     dir_name = os.path.basename(dir_path)
     exe_file = os.path.join(out_dir, dir_name)
     compile_dir(dir_name, dir_path, exe_file, config,
-                args.smx_lib, args.libprof, args.pic)
+                args.profiler, args.libprof, args.pic)
