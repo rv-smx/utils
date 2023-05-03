@@ -71,7 +71,7 @@ class CompilationConfig:
     if cfg in ignore.get('configs', []):
       return False
     for f in ignore.get('files', []):
-      if file.endswith(f):
+      if file == f:
         return False
     return True
 
